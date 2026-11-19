@@ -4,7 +4,7 @@
 
 **运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → CSV 落盘 → Excel 导出，一条龙。**
 
-![version](https://img.shields.io/badge/version-v0.0.1-2C7BE5)
+![version](https://img.shields.io/badge/version-v0.0.2-2C7BE5)
 ![framework](https://img.shields.io/badge/.NET_Framework-4.7.2-5C2D91?logo=dotnet)
 ![platform](https://img.shields.io/badge/platform-Windows_10_11-0078D6?logo=windows11)
 ![plc](https://img.shields.io/badge/PLC-三菱_FX5U_MC协议-FF6A00)
@@ -50,6 +50,9 @@ dotnet build ProductionStatistics\ProductionStatistics.csproj -c Debug
 
 # ④ 端到端自动化回归（计数逻辑改动后必跑，7 组用例 12 断言）
 powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
+
+# ⑤ 主题键契约静态检查（改主题键/库样式/主窗控件键后必跑）
+powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.ps1
 ```
 
 ## 功能特性
@@ -67,8 +70,14 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
   启动载入最近三天续算，重启不断账；
 - **Excel 导出**：EPPlus 输出 27 行 × 10 列完整履历（标题/表头/两班 12 小时行+合计）；
 - **中英双语 + 深浅主题**：语言运行中一键切换（CSV/Excel 固定中文格式），主题切换写回 ini；
-- **自绘无边框窗口**：去系统标题栏 + 圆角外框 + 伪最大化（铺满工作区不盖任务栏），
-  窗口按屏幕分辨率自适应（现场 1280×1024 可整窗显示）；
+  颜色/阴影全部走库 `Brush.Shell.*` 语义键 + 动态资源，主题开关/胶囊/状态灯用 `Tag` 语义着色，
+  两本主题键集由 `Run-ThemeContractTests.ps1` 静态校验（各 133 键、键集一致）；
+- **Kaleidoscope.UI 控件族**：顶栏 / 班次页签 / 语言胶囊 / 主题开关 / 投影卡片 / 图标方块 /
+  信息提示框 / 状态灯 / 稼动率圆环 / 细滚动条全部复用库 `Kx*` 键（键契约见
+  `extern/kaleidoscope/Kaleidoscope.UI/README.md`），本工程只保留 KPI 卡片外壳与 DataGrid；
+- **无边框圆角窗口**：继承库 `ChromeBorderlessWindow` 基类（分层真圆角 + WindowChrome +
+  `WM_GETMINMAXINFO` 最大化工作区修正），去系统标题栏、圆角外框、真最大化铺满工作区不盖
+  任务栏，窗口按屏幕分辨率自适应（现场 1280×1024 可整窗显示）；
 - **滚动日志与自诊断**：按天分文件保留 30 天，ERROR 镜像 `错误日志.txt`；
   `时间账目`（每分钟差额核对）/`本分钟产量`（对照 PLC 侧件数）/
   `自锁位过密/脉冲过窄`告警——现场排障三件套。
@@ -112,7 +121,7 @@ ProductionStatistics/                    # 仓库根
 │   └── Kaleidoscope.UI/                 #   WPF 复用控件库（键板 / Fresh·Kx 控件族 / 圆角窗基类）
 ├── docs/                                # 三份培训文档（操作员/客户技术/内部版）+ 截图
 ├── tools/
-│   ├── E2ETests/                        # ★ 端到端自动化回归（一键 7 组用例）
+│   ├── E2ETests/                        # ★ 端到端回归 7 组用例 + 主题键契约静态检查
 │   └── DocShot/                         # 文档截图 harness（FakePlc 假 PLC / 核验 / PDF 转换）
 ├── AGENTS.md                            # AI 协作规范（改代码前必读）
 ├── CHANGELOG.md                         # 版本改动记录

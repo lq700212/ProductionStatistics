@@ -39,6 +39,7 @@ namespace DocShot
         [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr param);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern int GetClassName(IntPtr hwnd, StringBuilder sb, int max);
         [DllImport("user32.dll")] private static extern int GetWindowText(IntPtr hwnd, StringBuilder sb, int max);
         [DllImport("user32.dll")] private static extern IntPtr GetDlgItem(IntPtr hDlg, int id);
@@ -449,10 +450,36 @@ namespace DocShot
             string path = Path.Combine(outDir, file);
             try
             {
+                // 【V2.3.0 自愈】06 报警图曾拍到 160×28（主窗 HWND 瞬时失效时
+                // GetWindowRect 失败、矩形退化成栈残值）。截图前先确认句柄
+                // 有效，失效则从进程重新取主窗句柄再截，避免把垃圾图写进文档。
+                if (!IsWindow(mainHwnd))
+                {
+                    Log("SHOT WARN " + file + " mainHwnd 失效，重新获取主窗句柄");
+                    try
+                    {
+                        var p = Process.GetProcessById(app.Id);
+                        var hNew = p.MainWindowHandle;
+                        if (hNew != IntPtr.Zero) mainHwnd = hNew;
+                    }
+                    catch (Exception ex) { Log("SHOT WARN 重新取句柄失败: " + ex.Message); }
+                }
                 SetForegroundWindow(mainHwnd);
                 Thread.Sleep(500);
-                RECT r; GetWindowRect(mainHwnd, out r);
+                RECT r;
+                if (!GetWindowRect(mainHwnd, out r))
+                {
+                    failCount++;
+                    Log("SHOT ERROR " + file + " GetWindowRect 失败（mainHwnd=" + mainHwnd + "）");
+                    return;
+                }
                 int w = r.Right - r.Left, h = r.Bottom - r.Top;
+                if (w <= 0 || h <= 0)
+                {
+                    failCount++;
+                    Log("SHOT ERROR " + file + " 窗口矩形异常 " + w + "x" + h);
+                    return;
+                }
                 using (var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
                 {
                     using (var g = Graphics.FromImage(bmp))
@@ -501,39 +528,60 @@ namespace DocShot
             return AutomationElement.FromHandle(mainHwnd);
         }
 
+        /// <summary>
+        /// 页签文本（显式顺序，与 MainWindow 的 6 个页签一致）。
+        /// 【V2.3.0 为什么改成按文本找】页签换成库 KxShiftTab（ToggleButton）后：
+        /// UIA 外框 ControlType=Button 但 **Name 为空**（文本在子 TextBlock 上），
+        /// 外框实测 231×47、窗口内 y≈95——旧实现按"宽>250、高>50、窗口内 y>120"
+        /// 三个坐标条件筛按钮，新样式三个条件全部不匹配（TABS found=0），页签切不动。
+        /// 改为先按 TextBlock 的 Name 找文本，再向上找 Button 祖先：不依赖任何
+        /// 尺寸/坐标，页签样式再改（更宽/更窄/更高/更低）都不影响。
+        /// </summary>
+        private static readonly string[] TabTexts =
+            { "当天白班产能", "当天夜班产能", "昨天白班产能", "昨天夜班产能", "前天白班产能", "前天夜班产能" };
+
         private static void ClickTab(int index)
         {
+            if (index < 0 || index >= TabTexts.Length) { failCount++; Log("TAB INDEX OUT OF RANGE " + index); return; }
             var root = Root();
-            var all = root.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
-            RECT main; GetWindowRect(mainHwnd, out main);
-            var tabs = new List<AutomationElement>();
-            foreach (AutomationElement e in all)
+            AutomationElement textEl = null;
+            for (int retry = 0; retry < 5 && textEl == null; retry++)
             {
-                var r = e.Current.BoundingRectangle;
-                if (r.Top > main.Top + 120 && r.Bottom < main.Top + 340 &&
-                    r.Width > 250 && r.Height > 50)
-                    tabs.Add(e);
+                textEl = root.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, TabTexts[index]));
+                if (textEl == null) Thread.Sleep(400);
             }
-            tabs.Sort(delegate(AutomationElement a, AutomationElement b)
-            {
-                return a.Current.BoundingRectangle.Left.CompareTo(b.Current.BoundingRectangle.Left);
-            });
-            Log("TABS found=" + tabs.Count);
-            if (tabs.Count <= index) { failCount++; Log("TAB MISSING index=" + index); return; }
+            if (textEl == null) { failCount++; Log("TAB TEXT MISSING index=" + index + " text=" + TabTexts[index]); return; }
+            var tab = GetButtonAncestor(textEl);
+            if (tab == null) { failCount++; Log("TAB ANCESTOR MISSING index=" + index); return; }
             // 偶发：第一次点击只激活窗口/点在按钮边缘，页签不切换。
             // 以 ToggleButton 的选中态为准，最多点 3 次（第二次起往左偏一点避开间隙）。
             for (int attempt = 0; attempt < 3; attempt++)
             {
-                var r = tabs[index].Current.BoundingRectangle;
+                var r = tab.Current.BoundingRectangle;
                 Log("TAB rect[" + index + "] " + (int)r.Left + "," + (int)r.Top
                     + " " + (int)r.Width + "x" + (int)r.Height + " attempt=" + attempt);
-                ClickCenterRel(tabs[index], "tab" + index, attempt == 0 ? 0.5 : 0.35);
+                ClickCenterRel(tab, "tab" + index, attempt == 0 ? 0.5 : 0.35);
                 Thread.Sleep(1200);
-                if (IsTabOn(tabs[index])) { Log("TAB OK index=" + index); return; }
+                if (IsTabOn(tab)) { Log("TAB OK index=" + index); return; }
             }
             failCount++;
             Log("TAB FAILED index=" + index);
+        }
+
+        /// <summary>从元素向上找最近的 ControlType.Button 祖先（页签 ToggleButton 外框）。</summary>
+        private static AutomationElement GetButtonAncestor(AutomationElement e)
+        {
+            var walker = TreeWalker.ControlViewWalker;
+            try
+            {
+                for (var cur = e; cur != null; cur = walker.GetParent(cur))
+                {
+                    if (cur.Current.ControlType == ControlType.Button) return cur;
+                }
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>ToggleButton 当前是否为选中态（WPF ToggleButton 暴露 TogglePattern）</summary>
@@ -676,33 +724,181 @@ namespace DocShot
         /// 做法与资源管理器一致：Alt+D 聚焦地址栏 → Ctrl+A 全选 → 输入路径 → 回车。
         /// 路径必须是 ASCII（本工具用公共文档下的 ProductionHistoryExport，截图里不出现内部目录名）。
         /// </summary>
-        private static void NavigateDialog(string dir)
+        /// <remarks>
+        /// 【V2.3.0 为什么不用 Alt+D】实测 Win10“另存为”对话框里 Alt+D 不会激活面包屑地址栏，
+        /// 路径被打进“文件名”框：旧实现回车后目录确实切过去了，但文件名框残留目录路径，
+        /// 紧接着 UIA SetValue 又命中被重建/禁用的元素（ElementNotEnabledException），
+        /// 导出截图流程直接中断。改为：点“文件名”框 → Ctrl+A → 输入目录 → 回车
+        /// （文件对话框会把带路径的文件名当目录打开），切换后文件名框是干净的。
+        /// </remarks>
+        private static void NavigateDialog(IntPtr dlg, string dir)
         {
             try
             {
-                // Alt+D
-                keybd_event(0x12, 0, 0, UIntPtr.Zero);
-                keybd_event(0x44, 0, 0, UIntPtr.Zero);
-                keybd_event(0x44, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                keybd_event(0x12, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                Thread.Sleep(350);
-
-                // Ctrl+A
-                keybd_event(0x11, 0, 0, UIntPtr.Zero);
-                keybd_event(0x41, 0, 0, UIntPtr.Zero);
-                keybd_event(0x41, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                keybd_event(0x11, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                Thread.Sleep(150);
-
-                foreach (char c in dir) SendUnicode(c);
-                Thread.Sleep(200);
-
-                keybd_event(0x0D, 0, 0, UIntPtr.Zero);
-                keybd_event(0x0D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                Thread.Sleep(1500);
+                if (!TypeIntoFileNameBox(dlg, dir, 6000))
+                {
+                    Log("NAVIGATE ERROR 找不到文件名框");
+                    return;
+                }
+                PressEnter();
+                Thread.Sleep(1800);
                 Log("NAVIGATE dialog -> " + dir);
             }
             catch (Exception ex) { Log("NAVIGATE ERROR " + ex.Message); }
+        }
+
+        /// <summary>
+        /// 在“另存为”对话框里找“文件名”编辑框。
+        /// 不能只认 AutomationId=1001：实测该 ID 命中的是顶部“搜索”框（把目录文字当成
+        /// 搜索词显示在搜索框里），对它 SetValue 会抛 ElementNotEnabledException。
+        /// 改按位置筛：位于对话框纵向 60% 之后、宽度超过对话框 30% 的 Edit 即文件名框。
+        /// </summary>
+        private static AutomationElement FindFileNameEdit(IntPtr dlg, int timeoutMs)
+        {
+            int waited = 0;
+            while (true)
+            {
+                try
+                {
+                    RECT dr; GetWindowRect(dlg, out dr);
+                    int dh = dr.Bottom - dr.Top, dw = dr.Right - dr.Left;
+                    if (dh > 0 && dw > 0)
+                    {
+                        var root = AutomationElement.FromHandle(dlg);
+                        var edits = root.FindAll(TreeScope.Descendants,
+                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+                        foreach (AutomationElement e in edits)
+                        {
+                            var b = e.Current.BoundingRectangle;
+                            if (b.Height > 10 && b.Width > dw * 0.3 && b.Top > dr.Top + dh * 0.6)
+                                return e;
+                        }
+                    }
+                }
+                catch { }
+                if (waited >= timeoutMs) return null;
+                Thread.Sleep(300); waited += 300;
+            }
+        }
+
+        /// <summary>往“文件名”框输入文本：先点实心（保证焦点），再 Ctrl+A 覆盖、逐字符 Unicode 输入。</summary>
+        private static bool TypeIntoFileNameBox(IntPtr dlg, string text, int timeoutMs)
+        {
+            var edit = FindFileNameEdit(dlg, timeoutMs);
+            if (edit == null) return false;
+            try
+            {
+                var r = edit.Current.BoundingRectangle;
+                if (r.Width > 4 && r.Height > 4)
+                {
+                    SetCursorPos((int)(r.Left + r.Width / 2), (int)(r.Top + r.Height / 2));
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+                }
+                else edit.SetFocus();
+            }
+            catch { try { edit.SetFocus(); } catch { } }
+            Thread.Sleep(250);
+            PressCtrlA();
+            Thread.Sleep(120);
+            foreach (char c in text) SendUnicode(c);
+            Thread.Sleep(250);
+            return true;
+        }
+
+        /// <summary>
+        /// 清掉“另存为”对话框顶部“搜索”框里的残留关键字。
+        /// 为什么需要：Win10 文件对话框会把上次搜索词跨进程记住，一旦残留，
+        /// 文件列表被过滤成“没有与搜索条件匹配的项”，培训文档截图失真。
+        /// 做法：优先点搜索框右侧的“清除搜索”按钮（真实点击、Windows 自己刷新列表）；
+        /// 找不到按钮才退回 ValuePattern 置空（不按回车，避免误触“保存”）。
+        /// </summary>
+        private static void ClearDialogSearch(IntPtr dlg)
+        {
+            try
+            {
+                RECT dr; GetWindowRect(dlg, out dr);
+                int dh = dr.Bottom - dr.Top;
+                var root = AutomationElement.FromHandle(dlg);
+                var buttons = root.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+                foreach (AutomationElement e in buttons)
+                {
+                    string n = e.Current.Name ?? "";
+                    var b = e.Current.BoundingRectangle;
+                    if (b.Top < dr.Top + dh * 0.3 && b.Width > 4 &&
+                        (n.Contains("清除") || n.IndexOf("Clear", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        ClickCenterRel(e, "清除搜索", 0.5);
+                        Log("CLEAR search via button '" + n + "'");
+                        Thread.Sleep(900);
+                        return;
+                    }
+                }
+                var edits = root.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+                foreach (AutomationElement e in edits)
+                {
+                    var b = e.Current.BoundingRectangle;
+                    if (b.Top > dr.Top + dh * 0.3) continue;      // 只看顶部搜索框
+                    object vp;
+                    if (!e.TryGetCurrentPattern(ValuePattern.Pattern, out vp)) continue;
+                    string val = ((ValuePattern)vp).Current.Value;
+                    if (string.IsNullOrEmpty(val)) return;         // 没有残留，什么都不做
+                    ((ValuePattern)vp).SetValue("");
+                    Log("CLEAR search via SetValue '" + val + "'");
+                    Thread.Sleep(600);
+                    return;
+                }
+            }
+            catch (Exception ex) { Log("CLEAR SEARCH ERROR " + ex.Message); }
+        }
+
+        /// <summary>
+        /// 用 UIA ValuePattern 设置“文件名”框文本（只写文件名，不带路径）。
+        /// 导航目录后对话框会重建控件，旧引用会变成禁用态，因此这里循环重查：
+        /// 每次都重新 FindFileNameEdit，只有 IsEnabled 为真才 SetValue；
+        /// 多次仍不可用返回 false，由调用方退回键盘输入。
+        /// </summary>
+        private static bool SetFileNameByUia(IntPtr dlg, string text)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                var target = FindFileNameEdit(dlg, 0);
+                if (target != null)
+                {
+                    try
+                    {
+                        if (target.Current.IsEnabled)
+                        {
+                            object vp;
+                            if (target.TryGetCurrentPattern(ValuePattern.Pattern, out vp))
+                            {
+                                ((ValuePattern)vp).SetValue(text);
+                                Log("SET filename via UIA");
+                                return true;
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Log("SET FILENAME retry: " + ex.Message); }
+                }
+                Thread.Sleep(300);
+            }
+            return false;
+        }
+
+        private static void PressCtrlA()
+        {
+            keybd_event(0x11, 0, 0, UIntPtr.Zero);                       // Ctrl 按下
+            keybd_event(0x41, 0, 0, UIntPtr.Zero);                       // A 按下
+            keybd_event(0x41, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(0x11, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
+        private static void PressEnter()
+        {
+            keybd_event(0x0D, 0, 0, UIntPtr.Zero);
+            keybd_event(0x0D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
 
         private static void SendUnicode(char c)
@@ -747,34 +943,19 @@ namespace DocShot
             lock (knownDialogs) { knownDialogs.Add(dlg); }
             Thread.Sleep(800);
             // 先导航到临时目录再截图：默认落在用户“文档”，会把真实文档名拍进客户文档。
-            NavigateDialog(dir);
-            CaptureWindow(dlg, "09-export-save-dialog.png", "导出-保存对话框");
+            NavigateDialog(dlg, dir);
+            ClearDialogSearch(dlg);
+            Thread.Sleep(600);
 
-            // 文件名编辑框：标准控件 ID 1148（0x47C），UIA 找不到时用 WM_SETTEXT
-            IntPtr edit = GetDlgItem(dlg, 0x47C);
-            if (edit != IntPtr.Zero)
+            // 文件名：导航后该编辑框可能被重建（旧元素禁用/失效），所以统一走
+            // “重新查找 + 等可用”的路径；UIA 设置失败再退回键盘输入兜底。
+            if (!SetFileNameByUia(dlg, fileName))
             {
-                SendMessage(edit, WM_SETTEXT, IntPtr.Zero, xlsx);
-                Log("SET filename via WM_SETTEXT");
-            }
-            else
-            {
-                var uia = AutomationElement.FromHandle(dlg);
-                var edits = uia.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
-                AutomationElement target = null;
-                foreach (AutomationElement e in edits)
-                {
-                    if (e.Current.AutomationId == "1001") { target = e; break; }
-                }
-                if (target == null && edits.Count > 0) target = edits[edits.Count - 1];
-                if (target == null) { failCount++; Log("FILENAME EDIT MISSING"); return; }
-                object vp;
-                if (target.TryGetCurrentPattern(ValuePattern.Pattern, out vp))
-                    ((ValuePattern)vp).SetValue(xlsx);
-                Log("SET filename via UIA");
+                Log("SET filename via UIA 失败，改用键盘输入");
+                if (!TypeIntoFileNameBox(dlg, fileName, 4000)) { failCount++; Log("FILENAME EDIT MISSING"); return; }
             }
             Thread.Sleep(300);
+            CaptureWindow(dlg, "09-export-save-dialog.png", "导出-保存对话框");
 
             // 保存按钮用鼠标点（UIA Invoke 会同步等到 MessageBox 关闭，卡住发送线程）
             var dlgRoot = AutomationElement.FromHandle(dlg);

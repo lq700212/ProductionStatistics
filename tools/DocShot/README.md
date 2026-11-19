@@ -1,6 +1,6 @@
 # DocShot —— 生产统计培训文档截图与交付流水线
 
-本目录是「生产统计（WPF 2.2.1.0）」三份培训文档的配套工具链：用**真 exe + 假 PLC**
+本目录是「生产统计（WPF 0.0.2）」三份培训文档的配套工具链：用**真 exe + 假 PLC**
 跑真实采集/统计/落盘，再截图、后处理、核验、转 PDF。禁止 P 图，截图里的数字都来自
 真实运行路径，图注统一标注「演示数据」。
 
@@ -18,7 +18,7 @@
 | `DocShot.cs` | 截图驱动：备份现场 → 种子数据 → 改 ini → 起假 PLC → 起真 exe → 逐场景截图 → 还原现场 |
 | `FakePlc.cs` | 假 PLC：HslCommunication 12.6 `MelsecMcServer(true)`，MC 3E 二进制，默认端口 6060 |
 | `seed_data.py` | 生成今天/昨天/前天的 25 行 × 14 列 CSV（UTF-8 BOM） |
-| `postprocess.py` | 清 PrintWindow 四角黑弧、裁对话框 10 px 黑边，主界面等比缩到 1800 宽 |
+| `postprocess.py` | 清 PrintWindow 四角黑弧、裁对话框黑边（实测 7 px），宽度超 1800 的缩到 1800 |
 | `check_config.py` | 核验配置的唯一事实源：功能边界、硬件、禁词、必需章节、图片白名单、ini/版本/源码常量自检 |
 | `check_docs.py` | 三份文档 + 截图 + PDF 的全量核验（调用 `check_config.py`） |
 | `md_to_pdf.py` | Markdown → HTML → Edge 无头打印 PDF，带 A4 版式与图注绑定 |
@@ -115,9 +115,9 @@ python tools\DocShot\check_docs.py
 ```
 
 - `postprocess.py`：只处理宽度 ≥2000 的大图做四角泛洪清近黑像素（阈值 24，
-  单角上限 5000）；所有图片先裁掉整行/整列 99% 近黑的外圈（09/10 各有 10 px），
-  再把主界面等比缩到 1800 宽；对话框不缩放。
-- `check_config.py --strict`：ini 现场值、工程版本 2.2.1.0、源码常量抽查；
+  单角上限 5000）；所有图片先裁掉整行/整列 99% 近黑的外圈（本机实测 09/10 各 7 px，
+  随 DPI 与窗口边框在 7~10 px 间浮动），宽度超过 1800 的等比缩到 1800（小图不放大）。
+- `check_config.py --strict`：ini 现场值、工程版本 0.0.2、源码常量抽查；
   失败返回非 0，可单独当“拍摄后现场是否还原”的守门员。
 - `check_docs.py`：文档编码/字数/表格/图片/章节/禁词/否定语境/PLC 地址键/
   内部版源码定位/PDF 体积与文件头/HTML 残留，一次跑完。
@@ -148,6 +148,10 @@ PDF 必须 >50 KB、文件头为 `%PDF-`；`check_docs.py` 会复核。
 | 客户文档出现内部路径/用户名 | 截图落点用了 `%TEMP%` 或用户“文档” | 导出落点改公共文档；09 图登记为内部专用，客户版引用直接 FAIL |
 | CSV 被 Excel 打开乱码 | 没写 UTF-8 BOM | `seed_data.py` 固定 `utf-8-sig`，25 行 × 14 列 |
 | 文档里出现 `truncated` / `TODO` | 分段写作的截断残留 | `check_docs.py` 通用禁词直接 FAIL |
+| `TABS found=0`，页签切不动 | 页签换成库 `KxShiftTab` 后 UIA 外框 `Name` 为空、尺寸 231×47、窗口内 y≈95，旧的"宽>250 / 高>50 / y>120"三条件全不匹配 | `ClickTab` 改按页签文本找 TextBlock + 向上找 Button 祖先，零坐标依赖 |
+| 导出截图中断：`ElementNotEnabledException` | Win10“另存为”里 `Alt+D` 不激活地址栏，路径进了文件名框；回车切目录后文件名框残留路径，旧引用又被重建为禁用态 | 点文件名框 → Ctrl+A → 输目录 → 回车；再按位置筛文件名框写文件名 |
+| 09 图文件列表显示“没有与搜索条件匹配的项” | 文件对话框跨进程记住上次搜索词，列表被过滤 | `ClearDialogSearch` 点“清除搜索”按钮，兜底用 ValuePattern 置空 |
+| 06 报警图偶发 160×28 | `mainHwnd` 瞬时失效，`GetWindowRect` 取到栈残值 | 截图前 `IsWindow` 自检 + 从进程重取句柄；矩形异常直接报错不写图 |
 
 ## 9. 交付前清理与还原
 

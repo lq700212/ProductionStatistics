@@ -33,6 +33,23 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1 -HslDat
 
 退出码：`0` = 全部 PASS；`1` = 有 FAIL（失败用例名直接打印在汇总里）。
 
+## 主题键契约回归（独立脚本，纯静态检查）
+
+UI 接入 Kaleidoscope.UI 后，主题键板跨"宿主两本主题 + 库样式引用"三处，
+漏键/写错一本都是**编译期静默**的显示问题，故单独固化：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.ps1
+```
+
+| 用例 | 断言 |
+| --- | --- |
+| C1 键集一致 | `Themes/Light.xaml` 与 `Themes/Dark.xaml` 的 `x:Key` 集合完全相等（当前各 133 键） |
+| C2 库键覆盖 | `Kaleidoscope.UI\Themes\ShellStyles.xaml` 里所有 `{DynamicResource 键}` 在两本宿主主题里都存在 |
+| C3 禁元素转发 | 宿主两本主题里零 `<StaticResource ResourceKey="..."/>`（net472 BAML 键值错位红线） |
+
+退出码同上。**改主题键/库样式/主窗控件样式键后必跑。**
+
 ## 前置条件
 
 - hsl.dat（HSL 授权文件，默认取 `E:\Project\HslCommunicationLicense\hsl.dat`）；

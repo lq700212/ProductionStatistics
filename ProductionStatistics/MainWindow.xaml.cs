@@ -10,6 +10,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Kaleidoscope.UI.Views;
 using Microsoft.Win32;
 
 namespace ProductionStatistics
@@ -31,8 +32,12 @@ namespace ProductionStatistics
     ///   关闭 → 停采集 → 最后落一次盘
     ///
     /// 线程纪律：采集线程只写内存 + 置脏标志，**不碰界面**；界面全部由 1 秒定时器在 UI 线程刷新。
+    ///
+    /// 【V2.3.0 基类迁移】继承 kaleidoscope 的 ChromeBorderlessWindow：
+    ///   无边框/透明/WindowChrome/根 Border 圆角 Clip/最大化工作区修正全部交给基类，
+    ///   本类不再手写伪最大化（原三段互锁：伪最大化 + 应用最大化外观 + 钉住内容高度已拆）。
     /// </summary>
-    public partial class MainWindow : Window
+    public partial class MainWindow : ChromeBorderlessWindow
     {
         // ===================== 统计数据与采集 =====================
         /// <summary>统计仓库（内存统计 + CSV 落盘）</summary>
@@ -101,6 +106,9 @@ namespace ProductionStatistics
             // ② 读配置（ini 已在 App 启动时读过一遍，这里直接取值）+ 载入历史 CSV 续算
             英文界面 = AppConfig.是英文界面;
             统计.载入最近三天();
+            // 主题开关初始态必须与 ini 实际主题对齐：否则深色启动时开关显示"浅色"，
+            // 用户点一下以为切深色、实际被切回浅色（开关与界面反相）。
+            主题开关.IsChecked = AppConfig.取主题() == App.深色主题;
 
             // ③ 建界面文字与页签
             应用语言(英文界面);
@@ -120,7 +128,7 @@ namespace ProductionStatistics
             按屏幕适配窗口();
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                钉住内容高度();
+                钉住内容高度(ActualHeight);
                 按内容设置最小尺寸();
             }), System.Windows.Threading.DispatcherPriority.Background);
 
@@ -283,16 +291,25 @@ namespace ProductionStatistics
             }
         }
 
+        /// <summary>
+        /// 设置提示框语义态：Tag 契约 = 库 KxInfoBox（底/描边）+ KxStatusDot（灯色）+ StatusChipText（文字色）。
+        /// 三处必须同步设同一个 Tag，否则会出现"底色红、文字灰"的错位。
+        /// 语义：Pri=正常（主色）/ Ng=离线或报警（红）。
+        /// </summary>
+        private void 设置提示(string 语义, string 文字)
+        {
+            提示框.Tag = 语义;
+            提示指示灯.Tag = 语义;
+            提示文字.Tag = 语义;
+            提示文字.Text = 文字;
+        }
+
         /// <summary>刷新提示卡：报警时段提示 / 离线提示 / 正常提示</summary>
         private void 刷新提示()
         {
             if (采集 != null && !采集.IsPlcOnline)
             {
-                提示框.Background = (Brush)FindResource("NgSoftBrush");
-                提示框.BorderBrush = (Brush)FindResource("NgBrush");
-                提示指示灯.Fill = (Brush)FindResource("NgBrush");
-                提示文字.Foreground = (Brush)FindResource("NgBrush");
-                提示文字.Text = 英文界面 ? "PLC disconnected, retrying..." : "PLC连接失败……重试中";
+                设置提示("Ng", 英文界面 ? "PLC disconnected, retrying..." : "PLC连接失败……重试中");
                 return;
             }
             // 找当前小时有没有报警时间，有就提示出来
@@ -310,21 +327,35 @@ namespace ProductionStatistics
             }
             if (报警秒 > 0)
             {
-                提示框.Background = (Brush)FindResource("NgSoftBrush");
-                提示框.BorderBrush = (Brush)FindResource("NgBrush");
-                提示指示灯.Fill = (Brush)FindResource("NgBrush");
-                提示文字.Foreground = (Brush)FindResource("NgBrush");
-                提示文字.Text = (英文界面 ? "Alarm " : "报警 ") + (报警秒 / 60.0).ToString("F1", CultureInfo.InvariantCulture)
-                    + (英文界面 ? " min in this hour" : " 分钟（本时段）");
+                设置提示("Ng", (英文界面 ? "Alarm " : "报警 ") + (报警秒 / 60.0).ToString("F1", CultureInfo.InvariantCulture)
+                    + (英文界面 ? " min in this hour" : " 分钟（本时段）"));
             }
             else
             {
-                提示框.Background = (Brush)FindResource("AccentSoftBrush");
-                提示框.BorderBrush = (Brush)FindResource("AccentBrush");
-                提示指示灯.Fill = (Brush)FindResource("AccentBrush");
-                提示文字.Foreground = (Brush)FindResource("AccentBrush");
-                提示文字.Text = 英文界面 ? "No alarm in this hour" : "本时段无报警";
+                设置提示("Pri", 英文界面 ? "No alarm in this hour" : "本时段无报警");
             }
+        }
+
+        /// <summary>设置底栏状态语义（KxStatusDot 灯色 + StatusChipText 文字色，Tag 必须同步）。</summary>
+        private void 设置状态条(string 语义, string 文字)
+        {
+            状态灯.Tag = 语义;
+            状态条文字.Tag = 语义;
+            状态条文字.Text = 文字;
+        }
+
+        /// <summary>设置设备状态徽标语义（StatusChipText 的 Tag 驱动颜色）。</summary>
+        private void 设置徽标(string 语义, string 文字)
+        {
+            设备状态徽标.Tag = 语义;
+            设备状态徽标.Text = 文字;
+        }
+
+        /// <summary>设置任意 TextBlock 的语义色与文字（Tag=null 走 StatusChipText 默认灰）。</summary>
+        private static void 设置文字语义(TextBlock 目标, string 语义, string 文字)
+        {
+            目标.Tag = 语义;
+            目标.Text = 文字;
         }
 
         /// <summary>刷新底部状态条（运行 / 暂停 / 报警 / 离线 四态）与右侧信息</summary>
@@ -333,46 +364,30 @@ namespace ProductionStatistics
             if (采集 == null) return;
             if (!采集.IsPlcOnline)
             {
-                状态灯.Fill = (Brush)FindResource("NgBrush");
-                状态条文字.Foreground = (Brush)FindResource("NgBrush");
-                状态条文字.Text = 英文界面 ? "PLC connection failed, retrying...!" : "PLC连接失败……重试中!";
-                设备状态徽标.Text = 英文界面 ? "Offline" : "离线";
-                设备状态徽标.Foreground = (Brush)FindResource("NgBrush");
+                设置状态条("Ng", 英文界面 ? "PLC connection failed, retrying...!" : "PLC连接失败……重试中!");
+                设置徽标("Ng", 英文界面 ? "Offline" : "离线");
             }
             else if (采集.latestAlarm)
             {
-                状态灯.Fill = (Brush)FindResource("NgBrush");
-                状态条文字.Foreground = (Brush)FindResource("NgBrush");
-                状态条文字.Text = 英文界面 ? "Machine ALARM!" : "设备报警中!";
-                设备状态徽标.Text = 英文界面 ? "ALARM" : "报警";
-                设备状态徽标.Foreground = (Brush)FindResource("NgBrush");
+                设置状态条("Ng", 英文界面 ? "Machine ALARM!" : "设备报警中!");
+                设置徽标("Ng", 英文界面 ? "ALARM" : "报警");
             }
             else if (采集.latestAuto)
             {
-                状态灯.Fill = (Brush)FindResource("OkBrush");
-                状态条文字.Foreground = (Brush)FindResource("OkBrush");
-                状态条文字.Text = 英文界面 ? "Machine RUNNING" : "设备运行中";
-                设备状态徽标.Text = 英文界面 ? "RUN" : "运行";
-                设备状态徽标.Foreground = (Brush)FindResource("OkBrush");
+                设置状态条("Ok", 英文界面 ? "Machine RUNNING" : "设备运行中");
+                设置徽标("Ok", 英文界面 ? "RUN" : "运行");
             }
             else
             {
-                状态灯.Fill = (Brush)FindResource("WarnBrush");
-                状态条文字.Foreground = (Brush)FindResource("WarnBrush");
-                状态条文字.Text = 英文界面 ? "Machine PAUSED!" : "设备暂停中!";
-                设备状态徽标.Text = 英文界面 ? "DOWN" : "暂停";
-                设备状态徽标.Foreground = (Brush)FindResource("WarnBrush");
+                设置状态条("Warn", 英文界面 ? "Machine PAUSED!" : "设备暂停中!");
+                设置徽标("Warn", 英文界面 ? "DOWN" : "暂停");
             }
 
-            // 自动中 / 报警两个信号的文字
-            自动中文字.Text = 采集.latestAuto ? (英文界面 ? "● Running" : "● 运行中") : (英文界面 ? "○ Stop" : "○ 停止");
-            自动中文字.Foreground = 采集.latestAuto
-                ? (Brush)FindResource("OkBrush")
-                : (Brush)FindResource("IdleBrush");
-            报警文字.Text = 采集.latestAlarm ? (英文界面 ? "● Alarm" : "● 报警") : (英文界面 ? "Normal" : "正常");
-            报警文字.Foreground = 采集.latestAlarm
-                ? (Brush)FindResource("NgBrush")
-                : (Brush)FindResource("OkBrush");
+            // 自动中 / 报警两个信号的文字（Tag=null → StatusChipText 默认灰，对应"停止"）
+            设置文字语义(自动中文字, 采集.latestAuto ? "Ok" : null,
+                采集.latestAuto ? (英文界面 ? "● Running" : "● 运行中") : (英文界面 ? "○ Stop" : "○ 停止"));
+            设置文字语义(报警文字, 采集.latestAlarm ? "Ng" : "Ok",
+                采集.latestAlarm ? (英文界面 ? "● Alarm" : "● 报警") : (英文界面 ? "Normal" : "正常"));
 
             // 底栏右侧信息（落盘时间每 30 秒变一次，这里显示上次记录的）
             上次落盘显示 = 统计.lastSaveTime;
@@ -382,21 +397,16 @@ namespace ProductionStatistics
                 + (英文界面 ? " · log: logs\\运行日志_日期.log" : " · 日志 logs\\运行日志_日期.log");
         }
 
-        /// <summary>刷新顶栏的 PLC 连接状态</summary>
+        /// <summary>刷新顶栏的 PLC 连接状态（StatusChip 三件套 Tag 同步：胶囊/灯/文字）。</summary>
         private void 刷新连接状态(bool 在线)
         {
-            if (在线)
-            {
-                连接指示灯.Fill = (Brush)FindResource("OkBrush");
-                连接状态文字.Text = 英文界面 ? "PLC connected" : "PLC 已连接";
-                连接状态文字.Foreground = (Brush)FindResource("OkBrush");
-            }
-            else
-            {
-                连接指示灯.Fill = (Brush)FindResource("NgBrush");
-                连接状态文字.Text = 英文界面 ? "PLC connection failed" : "PLC 连接失败";
-                连接状态文字.Foreground = (Brush)FindResource("NgBrush");
-            }
+            string 语义 = 在线 ? "Ok" : "Ng";
+            连接胶囊.Tag = 语义;
+            连接指示灯.Tag = 语义;
+            连接状态文字.Tag = 语义;
+            连接状态文字.Text = 在线
+                ? (英文界面 ? "PLC connected" : "PLC 已连接")
+                : (英文界面 ? "PLC connection failed" : "PLC 连接失败");
         }
 
         /// <summary>页签点击：切换选中页并立即刷新表格</summary>
@@ -534,17 +544,12 @@ namespace ProductionStatistics
             }
         }
 
-        // ===================== 自绘窗口（去系统标题栏 + 圆角外框） =====================
-
-        /// <summary>是否处于"工作区最大化"（伪最大化：铺满工作区但不盖住任务栏）</summary>
-        private bool 伪最大化中 = false;
-
-        /// <summary>伪最大化之前的窗口尺寸（还原时用，不再写死 1500×860）</summary>
-        private double 还原宽 = 1240, 还原高 = 920;
+        // ===================== 自绘窗口（外壳由 ChromeBorderlessWindow 基类负责） =====================
 
         /// <summary>
         /// 标题栏拖动：按住左键拖动窗口；双击切换最大化/还原。
-        /// 最大化状态下 DragMove 会抛异常（窗口已由系统接管），吞掉即可。
+        /// 基类 CaptionHeight=0（顶栏是业务内容，按钮多），所以系统标题区命中为 0，
+        /// 拖动/双击由这里手动处理；最大化状态下 DragMove 会抛异常，吞掉即可。
         /// </summary>
         private void 标题栏_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -575,43 +580,17 @@ namespace ProductionStatistics
         }
 
         /// <summary>
-        /// 切换"工作区最大化 / 还原"。
-        /// 不用 WindowState.Maximized：那会盖住任务栏，而且窗口全屏化后圆角与阴影就失效了；
-        /// 这里改成按工作区尺寸铺满，视觉上一样，但任务栏还在、圆角阴影也保留。
+        /// 切换最大化 / 还原：直接切 WindowState（真最大化）。
+        /// 【V2.3.0】原伪最大化（工作区铺满 + 手动归零 Padding/圆角 + 钉高度）已拆除：
+        ///   · 不盖任务栏 = 基类 WM_GETMINMAXINFO 工作区修正（FixMaximizedToWorkArea 缺省开）；
+        ///   · 最大化归零根 Border 圆角 / 还原取 CornerRadius DP = 基类 ApplyMaximizedCorner；
+        ///   · 溢出裁剪 = 基类根 Border Clip，内容不再反向撑大 HWND，无需钉高度。
         /// </summary>
         private void 切换最大化()
         {
-            Rect 工作区 = SystemParameters.WorkArea;
-            if (伪最大化中)
-            {
-                伪最大化中 = false;
-                应用最大化外观(false);
-                WindowState = WindowState.Normal;
-                Width = 还原宽; Height = 还原高;
-                Left = 工作区.Left + (工作区.Width - 还原宽) / 2;
-                Top = 工作区.Top + (工作区.Height - 还原高) / 2;
-            }
-            else
-            {
-                还原宽 = Width; 还原高 = Height;      // 记下还原尺寸
-                伪最大化中 = true;
-                应用最大化外观(true);
-                WindowState = WindowState.Normal;
-                Left = 工作区.Left; Top = 工作区.Top;
-                Width = 工作区.Width; Height = 工作区.Height;
-            }
-        }
-
-        /// <summary>
-        /// 最大化时的外观：**去掉外边距与圆角，四角贴边铺满工作区**。
-        /// （原来外框固定留 12px 透明边 + 18px 圆角，最大化后屏幕四周就有一圈"漏边"）
-        /// </summary>
-        private void 应用最大化外观(bool 最大化)
-        {
-            if (外框网格 == null || 窗口内容 == null) return;
-            窗口内容.Padding = new Thickness(最大化 ? 0 : 12);
-            窗口内容.CornerRadius = 最大化 ? new CornerRadius(0) : new CornerRadius(18);
-            窗口内容.BorderThickness = 最大化 ? new Thickness(0) : new Thickness(1);
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
         }
 
         /// <summary>
@@ -631,7 +610,6 @@ namespace ProductionStatistics
             MinWidth = Math.Min(1080, 工作区.Width - 12);
             // 最小高度 780：低于这个高度，右栏卡片和表格会被裁掉（内容显示不完整）
             MinHeight = Math.Min(780, 工作区.Height - 12);
-            还原宽 = 宽; 还原高 = 高;
 
             // 自己定位（多屏时以工作区为准，居中显示）
             WindowStartupLocation = WindowStartupLocation.Manual;
@@ -654,67 +632,67 @@ namespace ProductionStatistics
         }
 
         /// <summary>
-        /// 按**内容的实际高度**设置窗口最小高度：窗口拖到最小也不会把内容裁掉。
+        /// 按内容的实测高度设置窗口最小高度：窗口拖到最小也不会把内容裁掉。
         /// 内容高度 = 右侧栏三张卡片 + 表格 13 行 + 顶栏/页签/KPI/状态条（实测约 820 DIP）。
-        /// 若工作区比内容还矮（极小屏），则以工作区为准，此时右栏与表格各自内部滚动，
-        /// 底部状态条始终可见（内容不会整块丢失）。
+        /// 取 840 兜底（与旧版 DesiredSize 实测同口径）；工作区更矮时以工作区为准，
+        /// 此时右栏与表格各自内部滚动，底部状态条始终可见。
         /// </summary>
         private void 按内容设置最小尺寸()
         {
             try
             {
-                // 内容完整所需高度：顶栏+页签+KPI+表格 13 行+状态条+留白 ≈ 840
-                double 需要 = Math.Max(外框网格.DesiredSize.Height, 840);
+                double 需要 = 840;
                 double 上限 = SystemParameters.WorkArea.Height - 8;
                 MinHeight = Math.Min(Math.Max(需要, 700), 上限);
             }
             catch { }
         }
 
-        /// <summary>窗口尺寸变化：同步右侧栏宽度档位</summary>
+        /// <summary>窗口尺寸变化：同步右侧栏宽度档位 + 钉住根内容高度</summary>
         private void 窗口_SizeChanged(object sender, SizeChangedEventArgs e)
         {
             按窗口宽度调整右栏();
-            钉住内容高度();
+            钉住内容高度(e.NewSize.Height);
         }
 
         /// <summary>
-        /// 把根容器的高度钉死成"窗口高度 - 上下留白"。
-        /// 显式 Height 会覆盖 DesiredSize（FrameworkElement.MeasureCore 的行为），
-        /// 于是**内容再大也不会把窗口顶大**：
-        ///   · 表格行数超出 → DataGrid 自己的滚动条；
-        ///   · 右栏内容超出 → ScrollViewer 滚动条；
-        ///   · 底部状态条永远可见。
+        /// 把**根内容 Border** 的高度钉死成窗口客户区高度（本次 SizeChanged 的 NewSize，而不是
+        /// 窗口的 ActualHeight）。
+        /// 【V2.3.0 为什么不用 ActualHeight】MinHeight=840 时，若外部把窗口强改成更矮（截图
+        /// harness / 远程桌面 / 系统显示缩放切换），ActualHeight 仍是 840，而可视区只有 780：
+        /// 内容按 840 排版 → 底部状态条被裁到窗口外。NewSize 是这次变化的真实尺寸，永远与
+        /// 可视区一致；常驻拖拽时两者相等，无副作用。
+        /// 【V2.3.0 为什么还要钉】基类的根 Border Clip 只负责"裁掉溢出"，不做"压缩布局"：
+        /// 不钉高度时，内容自然 DesiredSize（约 850+ DIP）大于窗口，底部状态条会被裁掉；
+        /// 显式 Height 覆盖 DesiredSize 后，Grid 的 `*` 行被压缩 → DataGrid/右栏各自内部滚动，
+        /// 底部状态条永远可见（旧版钉在「外框网格」上的同一口径，迁基类后钉在根 Border）。
         /// </summary>
-        private void 钉住内容高度()
+        private void 钉住内容高度(double 目标)
         {
             try
             {
-                double 目标 = Math.Max(0, ActualHeight);
-                if (Math.Abs(外框网格.Height - 目标) > 0.5) 外框网格.Height = 目标;
+                目标 = Math.Max(0, 目标);
+                // Height 缺省是 NaN（Auto），Math.Abs(NaN - 目标) 也是 NaN、比较恒 false，
+                // 必须先判 NaN，否则永远钉不上（V2.3.0 迁移实测踩坑）。
+                if (double.IsNaN(窗口内容.Height) || Math.Abs(窗口内容.Height - 目标) > 0.5)
+                    窗口内容.Height = 目标;
             }
             catch { }
         }
 
         /// <summary>
-        /// 窗口状态变化：
-        ///   ① 外部（Win+↑ / 拖到屏幕顶部）触发的真最大化 → 转成"工作区最大化"，保持任务栏可见；
-        ///   ② 最大化图标在"方框 / 两个错开的方框"之间切换。
+        /// 窗口状态变化：更新最大化图标 + 最大化时去掉根 Border 的 12px 留白/描边。
+        /// 圆角归零与裁剪由基类 ApplyMaximizedCorner 负责；这里只处理基类不管的 Padding/BorderThickness。
         /// </summary>
         private void 窗口_StateChanged(object sender, EventArgs e)
         {
-            if (WindowState == WindowState.Maximized && !伪最大化中)
+            bool 最大化 = WindowState == WindowState.Maximized;
+            if (窗口内容 != null)
             {
-                还原宽 = Width; 还原高 = Height;
-                伪最大化中 = true;
-                Rect 工作区 = SystemParameters.WorkArea;
-                WindowState = WindowState.Normal;
-                应用最大化外观(true);
-                Left = 工作区.Left; Top = 工作区.Top;
-                Width = 工作区.Width; Height = 工作区.Height;
-                return;
+                窗口内容.Padding = new Thickness(最大化 ? 0 : 12);
+                窗口内容.BorderThickness = new Thickness(最大化 ? 0 : 1);
             }
-            最大化图标.Data = 伪最大化中
+            最大化图标.Data = 最大化
                 ? Geometry.Parse("M5.5,5.5 H12.5 V12.5 H5.5 Z M3.5,10.5 V3.5 H10.5")
                 : Geometry.Parse("M3.5,3.5 H10.5 V10.5 H3.5 Z");
         }

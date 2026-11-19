@@ -8,6 +8,8 @@
 # ---------------- 编译产物 ----------------
 ProductionStatistics/bin/
 ProductionStatistics/obj/
+# WPF 构建临时工程（dotnet build 生成的中间 csproj，构建中断时可能残留）
+*_wpftmp.csproj
 *.pdb
 *.cache
 *.tlog

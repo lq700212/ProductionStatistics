@@ -1,14 +1,13 @@
-<Window x:Class="ProductionStatistics.MainWindow"
+<ui:ChromeBorderlessWindow x:Class="ProductionStatistics.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:Kaleidoscope.UI.Views;assembly=Kaleidoscope.UI"
         Title="生产履历 - 点胶固化收料机"
         Icon="pack://application:,,,/Resources/app.ico"
         Height="920" Width="1240" MinHeight="780" MinWidth="1080"
         WindowStartupLocation="CenterScreen"
-        WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Transparent"
         ResizeMode="CanResize"
+        CaptionHeight="0" CornerRadius="18"
         FontFamily="Microsoft YaHei UI" FontSize="13"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         StateChanged="窗口_StateChanged"
@@ -43,18 +42,20 @@
     -->
     <!--
         外框结构（重要，改界面先看这里）：
-          · 最外层 Grid「外框网格」的高度由代码钉死 = 窗口高度（见 钉住内容高度）。
-            **窗口决定内容、内容不再反向撑大窗口**——这是"窗口缩小后内容显示不完整"的根治点：
-            DataGrid 的 DesiredSize 是全部 13 行的总高，若不钉死，窗口被拖矮时内容会溢出，
-            而 AllowsTransparency=True 的窗口一旦内容超出，WPF 会反向扩展 HWND（实测撑到 1084 DIP），
-            在 1280×1024 屏上超出工作区、底部状态条被切掉。
-          · 四角 12px 的圆角留白放在**内容层 Border 的 Padding** 里（Grid 没有 Padding 属性）。
-            最大化时留白与圆角一起置 0 → 铺满屏幕不留缝。
+          · 窗口继承 kaleidoscope 的 ChromeBorderlessWindow（V2.2.0）：分层真圆角三件套 /
+            WindowChrome 外壳 / 根 Border 圆角 Clip / 最大化工作区修正全部由基类负责——
+            本文件**不要**再写 WindowStyle=None、AllowsTransparency、Background、WindowChrome。
+          · 根内容必须是 Border（基类约定 Window.Content as Border）：就是下面的
+            「窗口内容」Border——视觉圆角与溢出裁剪的载体；CornerRadius 写值必须与
+            窗口的 CornerRadius="18" 一致（基类最大化归零、还原取 DP 值）。
+          · CaptionHeight=0：本工程顶栏是业务内容、按钮多，拖动仍由
+            MouseLeftButtonDown 手动处理（双击=最大化/还原），不让 WindowChrome
+            把顶栏吞成系统标题区——否则导出按钮/主题开关/语言按钮点不到。
+          · 四角 12px 圆角留白放在根 Border 的 Padding 里；最大化时由代码把
+            Padding/BorderThickness 置 0（圆角由基类同步归零），铺满工作区。
     -->
-    <Grid x:Name="外框网格">
-        <!-- 内容层：窗口真正的外观（圆角 + 描边） -->
-        <Border x:Name="窗口内容" CornerRadius="18" BorderThickness="1" Padding="12"
-                BorderBrush="{DynamicResource Line2Brush}" Background="{DynamicResource BgBrush}">
+    <Border x:Name="窗口内容" CornerRadius="18" BorderThickness="1" Padding="12"
+            BorderBrush="{DynamicResource Line2Brush}" Background="{DynamicResource BgBrush}">
         <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -68,8 +69,9 @@
         </Grid.RowDefinitions>
 
         <!-- ==================== 顶栏 ==================== -->
-        <Border x:Name="顶栏区" Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
-                BorderThickness="0,0,0,1" Padding="20,14"
+        <!-- 顶栏容器用库 KxTopBar（面板底 + 下边线 + Padding 20,14）；顶栏仍是业务内容，
+             拖动/双击由 MouseLeftButtonDown 手动处理（窗口 CaptionHeight=0）。 -->
+        <Border x:Name="顶栏区" Grid.Row="0" Style="{StaticResource KxTopBar}"
                 MouseLeftButtonDown="标题栏_MouseLeftButtonDown">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -97,14 +99,15 @@
 
                 <!-- 右：状态 + 时钟 + 主题 + 语言 + 导出 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- PLC 连接状态胶囊 -->
-                    <Border Background="{DynamicResource Panel2Brush}" BorderBrush="{DynamicResource LineBrush}"
-                            BorderThickness="1" CornerRadius="16" Padding="12,6" Margin="0,0,14,0">
+                    <!-- PLC 连接状态胶囊（库 StatusChip：Tag=Ok/Ng 切语义弱底+文字色，
+                         代码只改 Tag 不改颜色，切主题零遗漏） -->
+                    <Border x:Name="连接胶囊" Style="{StaticResource StatusChip}" Tag="Ok"
+                            Padding="12,6" Margin="0,0,14,0">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse x:Name="连接指示灯" Width="8" Height="8" Fill="{DynamicResource OkBrush}"
-                                     VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <TextBlock x:Name="连接状态文字" Text="PLC 已连接" Foreground="{DynamicResource Text2Brush}"
-                                       FontSize="12.5" />
+                            <Ellipse x:Name="连接指示灯" Style="{StaticResource KxStatusDot}" Tag="Ok"
+                                     Margin="0,0,8,0" />
+                            <TextBlock x:Name="连接状态文字" Style="{StaticResource StatusChipText}" Tag="Ok"
+                                       Text="PLC 已连接" FontSize="12.5" />
                         </StackPanel>
                     </Border>
 
@@ -112,35 +115,40 @@
                                Foreground="{DynamicResource Text2Brush}" FontSize="13.5" VerticalAlignment="Center"
                                Margin="0,0,16,0" />
 
-                    <!-- 主题开关（深/浅）：勾选 = 深色 -->
-                    <ToggleButton x:Name="主题开关" Style="{StaticResource ThemeSwitch}" IsChecked="False"
+                    <!-- 主题开关（深/浅）：勾选 = 深色 → 库 KxThemeSwitch（3D 轨道 + 月/日滑块） -->
+                    <ToggleButton x:Name="主题开关" Style="{StaticResource KxThemeSwitch}" IsChecked="False"
                                   Click="主题开关_Click" Margin="0,0,14,0" ToolTip="深色 / 浅色主题" />
 
                     <!-- 语言 -->
                     <Border Background="{DynamicResource Panel2Brush}" BorderBrush="{DynamicResource LineBrush}"
                             BorderThickness="1" CornerRadius="9" Padding="2" Margin="0,0,14,0">
                         <StackPanel Orientation="Horizontal">
-                            <RadioButton x:Name="语言中文" Style="{StaticResource LangButton}" Content="中文"
+                            <RadioButton x:Name="语言中文" Style="{StaticResource KxLangButton}" Content="中文"
                                          IsChecked="True" Checked="语言按钮_Click" Tag="中文" />
-                            <RadioButton x:Name="语言英文" Style="{StaticResource LangButton}" Content="English"
+                            <RadioButton x:Name="语言英文" Style="{StaticResource KxLangButton}" Content="English"
                                          Checked="语言按钮_Click" Tag="English" />
                         </StackPanel>
                     </Border>
 
-                    <Button x:Name="导出按钮" Style="{StaticResource PrimaryButton}" Click="导出按钮_Click"
-                            Content="导出 Excel" />
+                    <!-- 主按钮：库 KxPrimaryButton（胶囊 + 主色渐变 + 发光），实例覆盖尺寸保持原视觉体量 -->
+                    <Button x:Name="导出按钮" Style="{StaticResource KxPrimaryButton}" Click="导出按钮_Click"
+                            Content="导出 Excel" Padding="16,8" FontSize="13" />
 
-                    <!-- 窗口按钮（最小化 / 最大化还原 / 关闭）：紧跟在"导出 Excel"右侧，隔一点距离 -->
+                    <!-- 窗口按钮（最小化 / 最大化还原 / 关闭）：库 KxTitle*Button 族，
+                         宽度 40/高 28 由库口径，宿主只覆盖宽高贴齐原视觉（34×28）。 -->
                     <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
-                        <Button x:Name="最小化按钮" Style="{StaticResource 窗口按钮}" Click="最小化按钮_Click" ToolTip="最小化">
+                        <Button x:Name="最小化按钮" Style="{StaticResource KxTitleMinButton}" Click="最小化按钮_Click"
+                                ToolTip="最小化" Width="34" Height="28">
                             <Path Data="M3,7.5 H11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
                         </Button>
-                        <Button x:Name="最大化按钮" Style="{StaticResource 窗口按钮}" Click="最大化按钮_Click" ToolTip="最大化">
+                        <Button x:Name="最大化按钮" Style="{StaticResource KxTitleMaxButton}" Click="最大化按钮_Click"
+                                ToolTip="最大化" Width="34" Height="28">
                             <Path x:Name="最大化图标" Data="M3.5,3.5 H10.5 V10.5 H3.5 Z"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" StrokeLineJoin="Round" />
                         </Button>
-                        <Button x:Name="关闭按钮" Style="{StaticResource 关闭按钮}" Click="关闭按钮_Click" ToolTip="关闭">
+                        <Button x:Name="关闭按钮" Style="{StaticResource KxTitleCloseButton}" Click="关闭按钮_Click"
+                                ToolTip="关闭" Width="34" Height="28">
                             <Path Data="M3.5,3.5 L10.5,10.5 M10.5,3.5 L3.5,10.5"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                   StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
@@ -163,7 +171,8 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <ToggleButton Style="{StaticResource ShiftTab}"
+                        <!-- 双行页签用库 KxShiftTab（选中=主色弱底+主色描边+加粗） -->
+                        <ToggleButton Style="{StaticResource KxShiftTab}"
                                       IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                       Click="页签按钮_Click"
                                       Tag="{Binding 序号}">
@@ -199,7 +208,7 @@
                                     Background="{DynamicResource AccentGradientBrush}" />
                             <StackPanel Grid.Column="1">
                                 <StackPanel Orientation="Horizontal">
-                                    <Border Style="{StaticResource KpiIconBox}" Margin="0,0,8,0">
+                                    <Border Style="{StaticResource KxIconBox}" Margin="0,0,8,0">
                                         <Path Data="{Binding 图标路径}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2"
                                               Fill="Transparent" Stretch="Uniform" Width="14" Height="14"
                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -254,12 +263,12 @@
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <!-- 设备状态 -->
-                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                <Border Style="{StaticResource KxCard}" Margin="0,0,0,8">
                     <StackPanel>
                         <Grid>
-                            <TextBlock x:Name="设备状态标题" Text="设备状态" Style="{StaticResource CardTitleText}" HorizontalAlignment="Left" />
+                            <TextBlock x:Name="设备状态标题" Text="设备状态" Style="{StaticResource SectionTitle}" HorizontalAlignment="Left" />
                             <TextBlock x:Name="设备状态徽标" Text="运行中" HorizontalAlignment="Right"
-                                       Foreground="{DynamicResource OkBrush}" FontWeight="SemiBold" FontSize="12.5" />
+                                       Style="{StaticResource StatusChipText}" Tag="Ok" FontSize="12.5" />
                         </Grid>
                         <Grid Margin="0,9,0,0">
                             <Grid.ColumnDefinitions>
@@ -270,7 +279,8 @@
                                 <TextBlock x:Name="自动中标题" Text="设备自动中" Foreground="{DynamicResource TextBrush}" FontSize="13" />
                                 <TextBlock Text="M3200" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
                             </StackPanel>
-                            <TextBlock x:Name="自动中文字" Grid.Column="1" Text="停止" FontSize="13" />
+                            <TextBlock x:Name="自动中文字" Grid.Column="1" Text="停止" FontSize="13"
+                                       Style="{StaticResource StatusChipText}" FontWeight="Normal" />
                         </Grid>
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
@@ -281,7 +291,8 @@
                                 <TextBlock x:Name="报警标题" Text="设备报警" Foreground="{DynamicResource TextBrush}" FontSize="13" />
                                 <TextBlock Text="M3201" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
                             </StackPanel>
-                            <TextBlock x:Name="报警文字" Grid.Column="1" Text="正常" FontSize="13" />
+                            <TextBlock x:Name="报警文字" Grid.Column="1" Text="正常" FontSize="13"
+                                       Style="{StaticResource StatusChipText}" FontWeight="Normal" />
                         </Grid>
                         <Grid Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>
@@ -295,10 +306,10 @@
                             <TextBlock x:Name="稼动率说明" Text="生产 ÷（生产+待料+报警+停止）" Style="{StaticResource CaptionText}"
                                        FontSize="10" Margin="0,3,0,0" TextWrapping="NoWrap" />
                             </StackPanel>
-                            <!-- 稼动率圆环（StrokeDashArray 画弧，借鉴 galaxy 加载环的霓虹描边） -->
+                            <!-- 稼动率圆环（库 KxRingBg/KxRingValue + 代码设 StrokeDashArray 画弧） -->
                             <Grid Grid.Column="1" Width="46" Height="46" HorizontalAlignment="Right">
-                                <Ellipse Stroke="{DynamicResource LineBrush}" StrokeThickness="5" />
-                                <Ellipse x:Name="稼动率弧" Stroke="{DynamicResource AccentBrush}" StrokeThickness="5"
+                                <Ellipse Style="{StaticResource KxRingBg}" />
+                                <Ellipse x:Name="稼动率弧" Style="{StaticResource KxRingValue}"
                                          StrokeDashArray="0 145" RenderTransformOrigin="0.5,0.5">
                                     <Ellipse.RenderTransform>
                                         <RotateTransform Angle="-90" />
@@ -313,9 +324,9 @@
                 </Border>
 
                 <!-- 三单元状态 -->
-                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                <Border Style="{StaticResource KxCard}" Margin="0,0,0,8">
                     <StackPanel>
-                        <TextBlock x:Name="单元栏标题" Text="单元状态 / 本班统计" Style="{StaticResource CardTitleText}" Margin="0,0,0,6" />
+                        <TextBlock x:Name="单元栏标题" Text="单元状态 / 本班统计" Style="{StaticResource SectionTitle}" Margin="0,0,0,6" />
                         <ItemsControl ItemsSource="{Binding 单元列表}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -330,17 +341,18 @@
                                         <TextBlock Grid.Row="1" Text="{Binding 地址}" Style="{StaticResource CaptionText}"
                                                    Margin="0,2,0,0" />
                                         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
-                                            <Border Background="{DynamicResource OkSoftBrush}" CornerRadius="10" Padding="8,2" Margin="0,0,7,0">
-                                                <TextBlock Text="{Binding OK文字}" Foreground="{DynamicResource OkBrush}"
-                                                           FontSize="11" FontWeight="Bold" />
+                                            <Border Style="{StaticResource StatusChip}" Tag="Ok" Padding="8,2" Margin="0,0,7,0">
+                                                <TextBlock Text="{Binding OK文字}" Style="{StaticResource StatusChipText}" Tag="Ok"
+                                                           FontSize="11" />
                                             </Border>
-                                            <Border Background="{DynamicResource NgSoftBrush}" CornerRadius="10" Padding="8,2" Margin="0,0,7,0">
-                                                <TextBlock Text="{Binding NG文字}" Foreground="{DynamicResource NgBrush}"
-                                                           FontSize="11" FontWeight="Bold" />
+                                            <Border Style="{StaticResource StatusChip}" Tag="Ng" Padding="8,2" Margin="0,0,7,0">
+                                                <TextBlock Text="{Binding NG文字}" Style="{StaticResource StatusChipText}" Tag="Ng"
+                                                           FontSize="11" />
                                             </Border>
-                                            <Border Background="{DynamicResource IdleSoftBrush}" CornerRadius="10" Padding="8,2">
-                                                <TextBlock Text="{Binding 状态文字}" Foreground="{DynamicResource IdleBrush}"
-                                                           FontSize="11" FontWeight="Bold" />
+                                            <!-- 无 Tag：中性灰（FgDim + HoverBg），对应"空闲/运行"实时态 -->
+                                            <Border Style="{StaticResource StatusChip}" Padding="8,2">
+                                                <TextBlock Text="{Binding 状态文字}" Style="{StaticResource StatusChipText}"
+                                                           FontSize="11" />
                                             </Border>
                                         </StackPanel>
                                     </Grid>
@@ -351,17 +363,17 @@
                 </Border>
 
                 <!-- 提示卡（报警 / 离线） -->
-                <Border Style="{StaticResource Card}">
+                <Border Style="{StaticResource KxCard}">
                     <StackPanel>
-                        <TextBlock x:Name="提示标题" Text="提示" Style="{StaticResource CardTitleText}" Margin="0,0,0,6" />
-                        <Border x:Name="提示框" Background="{DynamicResource AccentSoftBrush}"
-                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" CornerRadius="10"
-                                Padding="11,9">
+                        <TextBlock x:Name="提示标题" Text="提示" Style="{StaticResource SectionTitle}" Margin="0,0,0,6" />
+                        <!-- 提示框用库 KxInfoBox：Tag=Ng（离线/报警）/ Pri（正常）切弱底+描边 -->
+                        <Border x:Name="提示框" Style="{StaticResource KxInfoBox}" Tag="Pri">
                             <StackPanel Orientation="Horizontal">
-                                <Ellipse x:Name="提示指示灯" Width="8" Height="8" Fill="{DynamicResource AccentBrush}"
-                                         VerticalAlignment="Center" Margin="0,0,9,0" />
-                                <TextBlock x:Name="提示文字" Text="数据正常" Foreground="{DynamicResource AccentBrush}"
-                                           FontSize="12.5" TextWrapping="Wrap" MaxWidth="230" />
+                                <Ellipse x:Name="提示指示灯" Style="{StaticResource KxStatusDot}" Tag="Pri"
+                                         Margin="0,0,9,0" />
+                                <TextBlock x:Name="提示文字" Style="{StaticResource StatusChipText}" Tag="Pri"
+                                           Text="数据正常" FontSize="12.5" FontWeight="Normal"
+                                           TextWrapping="Wrap" MaxWidth="230" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -375,10 +387,10 @@
                 BorderThickness="0,1,0,0" Padding="20,10">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Ellipse x:Name="状态灯" Width="11" Height="11" Fill="{DynamicResource WarnBrush}"
-                             VerticalAlignment="Center" Margin="0,0,11,0" />
-                    <TextBlock x:Name="状态条文字" Text="设备暂停中!" FontSize="13.5" FontWeight="Bold"
-                               Foreground="{DynamicResource WarnBrush}" />
+                    <Ellipse x:Name="状态灯" Style="{StaticResource KxStatusDot}" Tag="Warn"
+                             Width="11" Height="11" Margin="0,0,11,0" />
+                    <TextBlock x:Name="状态条文字" Style="{StaticResource StatusChipText}" Tag="Warn"
+                               Text="设备暂停中!" FontSize="13.5" />
                 </StackPanel>
                 <TextBlock x:Name="底栏信息" HorizontalAlignment="Right" VerticalAlignment="Center"
                            Style="{StaticResource CaptionText}"
@@ -387,5 +399,4 @@
         </Border>
         </Grid>
     </Border>
-    </Grid>
-</Window>
+</ui:ChromeBorderlessWindow>

@@ -66,14 +66,19 @@ namespace ProductionStatistics
                 };
                 var 集合 = Application.Current.Resources.MergedDictionaries;
                 // 先把旧的主题字典摘掉。
-                //【V2.2.2 注意】这里只能删"本工程"的主题字典（Themes\Light|Dark.xaml，相对路径
-                // Source 不含 ";component"）——kaleidoscope 的缺省键板/控件族字典 pack URI 里也含
-                // "/Themes/"，误删后 Kaleidoscope.UI 的语义键会静默失效（DynamicResource 缺键不报错）。
+                //【V2.2.2 注意】这里只能删"本工程"的主题字典——kaleidoscope 的缺省键板/控件族
+                // 字典 pack URI 里也含 "/Themes/"，误删后库语义键会静默失效（DynamicResource 缺键不报错）。
+                //【V2.3.0 修复】App.xaml 里宿主主题字典写的是相对 URI "Themes/Light.xaml"（不含前导
+                // 斜杠），旧判断 Contains("/Themes/") 永远匹配不到 → 旧字典删不掉、新字典追加在最后，
+                // 表现为"点主题开关日志说切了、界面颜色不变"。改为按 Light/Dark 文件名精确匹配。
                 for (int i = 集合.Count - 1; i >= 0; i--)
                 {
                     var 源 = 集合[i].Source;
-                    if (源 != null && 源.OriginalString.Contains("/Themes/")
-                        && !源.OriginalString.Contains(";component")) 集合.RemoveAt(i);
+                    if (源 == null || 源.OriginalString.Contains(";component")) continue;
+                    string 地址 = 源.OriginalString;
+                    if (地址.EndsWith("Themes/Light.xaml", StringComparison.OrdinalIgnoreCase)
+                        || 地址.EndsWith("Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase))
+                        集合.RemoveAt(i);
                 }
                 集合.Add(新字典);
                 Log.Info("主题已切换为: " + 主题名);

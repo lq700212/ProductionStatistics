@@ -1,5 +1,95 @@
 # 更新记录
 
+## v0.0.2 · 2026-11-19 · 主窗 UI 真接入 Kaleidoscope.UI（基类 + 控件族 + 主题契约）
+
+> 上一版只是"引用库程序集"，本轮把主窗真正落到库的基类与控件族上：
+> 可迁的直接用库键，库没有的沉淀成 `Kx*` 通用件（子模块另行提交）。
+> 本版定版 v0.0.2（工程版本同步 0.0.2）。
+
+### 主窗基类迁移（MainWindow.xaml / MainWindow.xaml.cs）
+
+- 根元素改继承 `Kaleidoscope.UI.Views.ChromeBorderlessWindow`（`CaptionHeight="0"`
+  `CornerRadius="18"`），删除 `WindowStyle/AllowsTransparency/Background` 声明——
+  分层真圆角三件套、WindowChrome 外壳、根 Border 圆角 Clip、
+  `WM_GETMINMAXINFO` 最大化工作区修正全部由基类负责。
+- **拆除伪最大化三段互锁**：删除 `伪最大化中/还原宽/还原高/应用最大化外观()/钉住内容高度()`
+  旧实现；`切换最大化()` 改真 `WindowState` 切换；`窗口_StateChanged` 只更新最大化图标，
+  并补上基类不管的 `Padding/BorderThickness` 归零（最大化时）。
+- **钉高口径修正**：内容高度改由 `SizeChanged.NewSize.Height` 驱动（原用 `ActualHeight`，
+  在 `MinHeight` 兜底时拿不到真实可视高度）；补 `double.IsNaN` 判断（`Height` 缺省 NaN 时
+  `Math.Abs(NaN-x)` 恒 false、永远钉不上，迁移实测踩坑）。
+- 真最大化验证：1920×1080 屏工作区 1920×1040 @(0,0)，不盖任务栏、四角圆角归零、
+  还原后圆角恢复 18。
+
+### 控件替换（MainWindow.xaml）
+
+| 区域 | 原宿主样式 | 现库键 |
+| --- | --- | --- |
+| 顶栏容器 | 手写 Border | `KxTopBar` |
+| PLC 连接胶囊 + 灯 + 文字 | 手写 Border/Ellipse | `StatusChip` + `KxStatusDot` + `StatusChipText`（Tag=Ok/Ng） |
+| 主题开关 | `ThemeSwitch` | `KxThemeSwitch` |
+| 语言切换 | `LangButton` | `KxLangButton` |
+| 导出按钮 | `PrimaryButton` | `KxPrimaryButton`（实例覆盖 `Padding=16,8` `FontSize=13`） |
+| 窗口三钮 | `窗口按钮`/`关闭按钮` | `KxTitleMinButton`/`KxTitleMaxButton`/`KxTitleCloseButton`（实例覆盖 34×28） |
+| 班次页签 | `ShiftTab` | `KxShiftTab` |
+| KPI 图标方块 | `KpiIconBox` | `KxIconBox` |
+| 右栏三卡 | `Card` | `KxCard`；卡片标题 `CardTitleText` → `SectionTitle` |
+| 稼动率圆环 | 手写 Ellipse | `KxRingBg` / `KxRingValue` |
+| 单元 OK/NG/IDLE 徽标 | 手写弱底 Border | `StatusChip` + `StatusChipText`（Tag=Ok/Ng/无） |
+| 提示框 | 手写弱底 Border | `KxInfoBox` + `KxStatusDot` + `StatusChipText`（Tag=Pri/Ng） |
+| 底栏状态灯 | 手写 Ellipse | `KxStatusDot`（Tag=Ok/Warn/Ng） |
+
+- **动态着色改语义 Tag**：`刷新提示/刷新状态条/刷新连接状态/设备状态徽标/自动中文字/报警文字`
+  不再在代码里 `FindResource` 赋 `Background/BorderBrush/Fill/Foreground`，统一设
+  `Tag="Ok/Warn/Ng/Pri"` 交给库样式触发器——切主题零遗漏、代码里零颜色字面量。
+- KPI 卡片外壳与 DataGrid 明确**不迁**（迁移收益低、视觉差异大），保留宿主 `Card`。
+- 删除宿主 `Controls/Styles.xaml` 中已被库接管的 8 个样式：`PrimaryButton` / `GhostButton` /
+  `ShiftTab` / `ThemeSwitch` / `LangButton` / `窗口按钮` / `关闭按钮` / `KpiIconBox`；
+  隐式 `ScrollBar` 改为 `BasedOn="{StaticResource KxSlimScrollBar}"`（单一来源，不双份并存）。
+
+### 主题键板与切换修复
+
+- 宿主 `Themes/Light.xaml` / `Dark.xaml` 各补一段 **Kaleidoscope.UI 契约键段**（字面值，
+  禁止 `<StaticResource ResourceKey=.../>` 元素转发）：`Brush.Shell.*` 业务壳键 +
+  `Fn.ShellCardRadius` + `Fx.ShellCardShadow` + 主题开关七键，两本各 133 键、键集完全一致。
+- **修复主题切换静默失效**：`App.切换主题` 原来按 `Contains("/Themes/")` 匹配宿主题字典，
+  但 `App.xaml` 里写的是相对 URI `Themes/Light.xaml`（无前导斜杠）→ 旧字典删不掉、
+  新字典追加在末尾，表现为"日志说已切换、界面颜色不变"。改为按
+  `EndsWith("Themes/Light.xaml"|"Themes/Dark.xaml")` 精确匹配，并保留 `;component`
+  排除库字典。浅→深→浅运行时切换实测生效。
+
+### 回归与沉淀
+
+- 新增 `tools/E2ETests/Run-ThemeContractTests.ps1`（纯静态、退出码可接 CI）：
+  C1 两本主题键集一致 / C2 库样式 DynamicResource 键 ⊆ 宿主两本主题 / C3 禁元素转发。
+  当前基线 `PASS=9 FAIL=0`，键数 133/133。
+- 目检回归：1280×900 / 1440×900 / 1500×920 三档 × 浅/深两色，1920×1080 真最大化
+  （工作区 1920×1040 @(0,0)，不盖任务栏、圆角归零）浅/深两色，状态条/右栏/表格
+  均完整；窗口最小高度 840 时右栏内部滚动、底部状态条始终可见。
+- 库侧 `Kx*` 壳族样式（`KxThemeSwitch/KxShiftTab/KxLangButton/KxCard/KxIconBox/KxTopBar/
+  KxInfoBox/KxStatusDot/KxRingBg/KxRingValue/KxSlimScrollBar`）写在 `extern/kaleidoscope`
+  子模块工作区（未提交，待与宿主一并提交后更新指针；库 CHANGELOG 另记）。
+
+### 培训文档截图流水线适配新 UI（tools/DocShot）
+
+- **页签定位改按文本**：`TABS found=0`，页签切不动。根因是库 `KxShiftTab` 的 UIA 外框
+  `Name` 为空（文本在子 TextBlock 上）、实测 231×47、窗口内 y≈95，旧实现按
+  "宽>250 / 高>50 / 窗口内 y>120" 三个坐标条件筛按钮，全部不匹配。改为先按页签文本
+  找 TextBlock、再向上找 Button 祖先，不再依赖尺寸与坐标。
+- **保存对话框导航改走"文件名"框**：`Alt+D` 在 Win10“另存为”对话框里不激活面包屑地址栏，
+  路径被打进文件名框；旧流程回车后目录能切过去，但文件名框残留路径，随后 UIA `SetValue`
+  命中重建/禁用的元素抛 `ElementNotEnabledException`，导出截图中断。现改为点文件名框 →
+  Ctrl+A → 输入目录 → 回车，再按"位于对话框下部、宽度>30%"筛出文件名框写文件名；
+  另补搜索框残留清理：文件对话框的搜索框会跨进程记住上次搜索词，残留时列表会被
+  过滤成“没有与搜索条件匹配的项”（本机只留下水印，同一入口一并清掉）。
+- **截图加窗口句柄自检**：06 报警图曾偶发拍到 160×28 小窗（`mainHwnd` 瞬时失效后
+  `GetWindowRect` 取到栈残值）。现截图前 `IsWindow` 校验、失效则从进程重取主窗句柄，
+  `GetWindowRect` 失败或矩形 ≤0 直接报错不写垃圾图。
+- **10 张截图按新 UI 全量重拍**（主界面 1500×920；09 裁边后 946×533、10 436×188），
+  `postprocess.py` → `check_config.py --strict` → `check_docs.py` → `md_to_pdf.py`
+  全流程通过，三份 PDF 1257/1431/1665 KB 重新生成。
+
+
 ## v0.0.1 · 2026-11-19 · 计数可靠性根治 + kaleidoscope submodule 接入 + 工程文档门户化
 
 > 本版起 CHANGELOG 重开（历史记录见 git 历史）。版本定版 v0.0.1。
