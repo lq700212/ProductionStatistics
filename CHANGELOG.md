@@ -1,5 +1,23 @@
 # 更新记录
 
+## v0.0.4 · 2026-11-19 · README 架构图按真实链路校正
+
+> 起因：复查 README 时发现架构图与代码有 5 处偏差——缺复位回写、缺连接状态热更旁路、
+> 授权箭头语义画反、缺配置源、Excel 导出触发方画错。本次只改文档，不动运行逻辑。
+
+### 校正内容
+
+- `PLC` ↔ `PlcCollector` 改为双向：补上 `PlcSignalResetter` 写回 false 复位自锁位这条关键回写链路。
+- 补 `PlcCollector -.-> MainWindow`：连接状态事件 + `dataDirty` 脏标志是采集线程直达界面的旁路，
+  不经过 `StatisticsStore`（1 秒定时器兜底对齐）。
+- 授权链路改为 `hsl.dat → HslAuthorization → 注册 → PlcCollector`（原图 `AUTH -.->|hsl.dat| COL`
+  把文件输入方向画反了）。
+- 补 `生产统计.ini` 配置源：采集参数（IP/端口/去抖/地址）与界面参数（语言/主题/设备名）分开流向。
+- Excel 导出改为界面按钮触发：`MainWindow → ExcelExporter`，`StatisticsStore -.-> ExcelExporter`
+  供当天记录，产物落 xlsx。
+- 架构图下补"连接状态热更"文字要点：事件即时刷新 + 1 秒定时器兜底，断线/恢复无需重启；
+  ini 配置改完仍重启生效。
+
 ## v0.0.3 · 2026-11-19 · 目录规范化：第三方二进制依赖统一收进 `libs/`
 
 > 起因：仓库根目录直接躺着 `EPPlus.dll` / `HslCommunication.dll` 两个第三方二进制，

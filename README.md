@@ -4,7 +4,7 @@
 
 **运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → CSV 落盘 → Excel 导出，一条龙。**
 
-![version](https://img.shields.io/badge/version-v0.0.3-2C7BE5)
+![version](https://img.shields.io/badge/version-v0.0.4-2C7BE5)
 ![framework](https://img.shields.io/badge/.NET_Framework-4.7.2-5C2D91?logo=dotnet)
 ![platform](https://img.shields.io/badge/platform-Windows_10_11-0078D6?logo=windows11)
 ![plc](https://img.shields.io/badge/PLC-三菱_FX5U_MC协议-FF6A00)
@@ -86,21 +86,45 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.p
 
 ```mermaid
 graph LR
-    PLC[三菱 FX5U<br/>MC 3E 帧 TCP] -->|合并读 11 位<br/>MelsecMcNet| COL[PlcCollector 采集线程<br/>上升沿计数+时间记账]
+    PLC[三菱 FX5U<br/>MC 3E 帧 TCP]
+    LIC[(hsl.dat<br/>HSL 商业授权)]
+    INI[(生产统计.ini)]
+
     subgraph KALE[kaleidoscope（submodule）]
-        AUTH[HslAuthorization<br/>HSL 授权统一注册]
-        UI[Kaleidoscope.UI<br/>WPF 控件族+键板]
+        AUTH[HslAuthorization<br/>授权统一注册]
+        UI[Kaleidoscope.UI<br/>控件族 + 键板 + 窗基类]
     end
-    AUTH -.->|hsl.dat| COL
-    COL --> STORE[StatisticsStore<br/>内存统计+30秒CSV落盘]
-    STORE --> UI1[MainWindow 1秒定时器<br/>6页签/KPI/单元状态]
-    STORE --> CSV[(生产履历_日期.csv)]
-    STORE --> XLS[ExcelExporter<br/>EPPlus 导出]
-    UI -.-> UI1
+
+    subgraph APP[ProductionStatistics.Wpf]
+        COL[PlcCollector 采集线程<br/>合并读 11 位 / 上升沿计数 / 时间记账]
+        STORE[StatisticsStore<br/>内存统计 + 30 秒落盘]
+        EXP[ExcelExporter<br/>EPPlus]
+        MAIN[MainWindow<br/>1 秒 DispatcherTimer]
+    end
+
+    PLC -->|合并读 11 位| COL
+    COL -->|写回 false 复位自锁位| PLC
+    LIC -.->|读取注册| AUTH
+    AUTH -.->|注册| COL
+    INI -.->|IP / 端口 / 去抖 / 地址| COL
+    INI -.->|语言 / 主题 / 设备名| MAIN
+
+    COL -->|计数 + 四类时间| STORE
+    STORE -->|30 秒整文件覆盖| CSV[(数据/生产履历_日期.csv)]
+    STORE -->|1 秒定时器拉取| MAIN
+    MAIN -->|点导出按钮| EXP
+    STORE -.->|当天记录| EXP
+    EXP --> XLSX[(xlsx 履历)]
+    COL -.->|连接状态事件 + 脏标志| MAIN
+    UI -.->|样式注入| MAIN
 ```
 
 - **线程纪律**：采集线程只写内存 + 置脏标志，**绝不碰界面**；界面全部由 1 秒 DispatcherTimer
   消费刷新；数据锁内禁止网络 IO（复位写 PLC 在锁外做）。
+- **连接状态热更**：`PlcCollector.IsPlcOnline` 由采集线程每轮维护；状态翻转时发
+  `连接状态已变化` 事件，经 `Dispatcher.BeginInvoke` 即时刷新顶栏胶囊/灯/文字，
+  1 秒定时器再无条件兜底对齐——断线/恢复最多 1 秒可见，后台每轮自动重试重连，
+  无需重启；离线时段不计入任何一类时间（不灌假账）。ini 配置改完仍需重启生效。
 - **计数链路**：读信号（合并读）→ `TriggerDebouncer` 去抖（OFF 持续时长 + 最小间隔双条件）
   → 上升沿计入当前小时桶 → `PlcSignalResetter` 复位自锁位（状态信号不复位）。
   首次采样只作基准不计数（启动残留 ON 不算产量、但必须清掉）。

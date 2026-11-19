@@ -3,7 +3,7 @@
 文档核验配置（唯一事实源）
 ==========================
 
-本文件集中登记「生产统计（WPF 0.0.3）」这次交付的真实边界：
+本文件集中登记「生产统计（WPF 0.0.4）」这次交付的真实边界：
   · 实际存在的功能 / 明确不存在的功能
   · 硬件品牌全集与实际配置（仅三菱 FX5U，无相机 / 光源 / 扫码枪）
   · 三份文档各自的角色、字数、表格、图片、必需章节
@@ -48,7 +48,7 @@ IMAGES_DIR = DOCS_DIR / "images"
 APP_NAME = "生产统计"
 APP_NAME_EN = "Production Statistics"
 TARGET = "点胶固化收料机"
-DELIVERY_VERSION = "0.0.3"
+DELIVERY_VERSION = "0.0.4"
 
 # 三份文档：key 供 check_docs.py 引用，file 必须与实际文件名一致
 DOCUMENTS = {
