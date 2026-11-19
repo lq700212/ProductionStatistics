@@ -1,0 +1,391 @@
+<Window x:Class="ProductionStatistics.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="生产履历 - 点胶固化收料机"
+        Icon="pack://application:,,,/Resources/app.ico"
+        Height="920" Width="1240" MinHeight="780" MinWidth="1080"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResize"
+        FontFamily="Microsoft YaHei UI" FontSize="13"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        StateChanged="窗口_StateChanged"
+        SizeChanged="窗口_SizeChanged"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <!-- ================= 界面布局（ASCII 图，改界面必须同步更新本图） =================
+        说明：窗口为**自绘窗口**——去掉系统标题栏（WindowStyle=None + AllowsTransparency=True），
+              整个外框做成圆角（外层阴影 Border + 内容层圆角 Border），右上角三个窗口按钮
+              （最小化 / 最大化还原 / 关闭）画在顶栏最右、"导出 Excel" 按钮的右侧。
+        ┌──────────────────────────────────────────────────────────────────────────────┐
+        │ 顶栏 Auto：Logo+标题 │ PLC状态胶囊 时钟 主题开关 中文/English 导出Excel ─ □ ✕ │
+        │ 页签栏 Auto：6 个班次页签（两行文字：班次名+日期，选中主色高亮）            │
+        │ KPI 区 Auto：6 张 KPI 卡片（**一行 6 列**，渐变主色竖条 + 大数字 + 副说明）   │
+        ├───────────────────────────────────────────┬───────────────────────────────┤
+        │ 主表格 *：DataGrid 12 小时行 + 合计行      │ 右侧栏 320px                 │
+        │  列：时段/小时产能/OK/NG/良率/生产/待料/   │  · 设备状态卡（自动中/报警/   │
+        │      报警/停止/稼动率                      │    稼动率圆环）               │
+        │                                            │  · 单元卡（三单元 OK/NG/IDLE）│
+        │                                            │  · 提示卡（报警/离线提示）   │
+        ├───────────────────────────────────────────┴───────────────────────────────┤
+        │ 状态条 Auto：设备状态灯 + 大字 + 右侧采样/落盘/日志信息                       │
+        └──────────────────────────────────────────────────────────────────────────────┘
+    ================================================================================ -->
+
+    <!--
+        窗口外观说明：
+          · 窗口 Background=Transparent + AllowsTransparency=True，四个角由下面这层圆角 Border 裁出来；
+          · **不用 DropShadowEffect 做外阴影**：它的模糊扩散会画到窗口的透明区域上，
+            在四个角上留下暗色方块（用户反馈"外框四角圆角没处理好"的根因）。
+            层次改用"描边 + 卡片自身阴影"体现，四个角保持干净。
+    -->
+    <!--
+        外框结构（重要，改界面先看这里）：
+          · 最外层 Grid「外框网格」的高度由代码钉死 = 窗口高度（见 钉住内容高度）。
+            **窗口决定内容、内容不再反向撑大窗口**——这是"窗口缩小后内容显示不完整"的根治点：
+            DataGrid 的 DesiredSize 是全部 13 行的总高，若不钉死，窗口被拖矮时内容会溢出，
+            而 AllowsTransparency=True 的窗口一旦内容超出，WPF 会反向扩展 HWND（实测撑到 1084 DIP），
+            在 1280×1024 屏上超出工作区、底部状态条被切掉。
+          · 四角 12px 的圆角留白放在**内容层 Border 的 Padding** 里（Grid 没有 Padding 属性）。
+            最大化时留白与圆角一起置 0 → 铺满屏幕不留缝。
+    -->
+    <Grid x:Name="外框网格">
+        <!-- 内容层：窗口真正的外观（圆角 + 描边） -->
+        <Border x:Name="窗口内容" CornerRadius="18" BorderThickness="1" Padding="12"
+                BorderBrush="{DynamicResource Line2Brush}" Background="{DynamicResource BgBrush}">
+        <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <!-- 主体行：必须给 MinHeight 兜底！否则窗口被拖小时，
+                 DataGrid 的内容高度会通过 Grid 反过来把窗口撑大 / 溢出，
+                 表现为"缩小后内容显示不完整"（表格自己内部滚动即可） -->
+            <RowDefinition Height="*" MinHeight="170" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ==================== 顶栏 ==================== -->
+        <Border x:Name="顶栏区" Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
+                BorderThickness="0,0,0,1" Padding="20,14"
+                MouseLeftButtonDown="标题栏_MouseLeftButtonDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 左：Logo + 标题 -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Logo：改用真实应用图标（Resources\app.png，圆形徽标），与 exe / 任务栏图标同一套 -->
+                    <Border Width="40" Height="40" CornerRadius="20"
+                            Background="{DynamicResource PanelBrush}"
+                            BorderBrush="{DynamicResource Line2Brush}" BorderThickness="1">
+                        <Image Source="pack://application:,,,/Resources/app.png" Width="34" Height="34"
+                               Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Center"
+                               ToolTip="生产统计" />
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="标题文字" Text="生产履历" FontSize="18" FontWeight="Bold" />
+                        <TextBlock x:Name="副标题文字" Style="{StaticResource CaptionText}" Margin="0,3,0,0"
+                                   Text="Machine Name: 点胶固化收料机" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- 右：状态 + 时钟 + 主题 + 语言 + 导出 -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- PLC 连接状态胶囊 -->
+                    <Border Background="{DynamicResource Panel2Brush}" BorderBrush="{DynamicResource LineBrush}"
+                            BorderThickness="1" CornerRadius="16" Padding="12,6" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="连接指示灯" Width="8" Height="8" Fill="{DynamicResource OkBrush}"
+                                     VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock x:Name="连接状态文字" Text="PLC 已连接" Foreground="{DynamicResource Text2Brush}"
+                                       FontSize="12.5" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock x:Name="时钟文字" Text="2026-01-01 00:00:00" FontFamily="Consolas, Microsoft YaHei UI"
+                               Foreground="{DynamicResource Text2Brush}" FontSize="13.5" VerticalAlignment="Center"
+                               Margin="0,0,16,0" />
+
+                    <!-- 主题开关（深/浅）：勾选 = 深色 -->
+                    <ToggleButton x:Name="主题开关" Style="{StaticResource ThemeSwitch}" IsChecked="False"
+                                  Click="主题开关_Click" Margin="0,0,14,0" ToolTip="深色 / 浅色主题" />
+
+                    <!-- 语言 -->
+                    <Border Background="{DynamicResource Panel2Brush}" BorderBrush="{DynamicResource LineBrush}"
+                            BorderThickness="1" CornerRadius="9" Padding="2" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="语言中文" Style="{StaticResource LangButton}" Content="中文"
+                                         IsChecked="True" Checked="语言按钮_Click" Tag="中文" />
+                            <RadioButton x:Name="语言英文" Style="{StaticResource LangButton}" Content="English"
+                                         Checked="语言按钮_Click" Tag="English" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="导出按钮" Style="{StaticResource PrimaryButton}" Click="导出按钮_Click"
+                            Content="导出 Excel" />
+
+                    <!-- 窗口按钮（最小化 / 最大化还原 / 关闭）：紧跟在"导出 Excel"右侧，隔一点距离 -->
+                    <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
+                        <Button x:Name="最小化按钮" Style="{StaticResource 窗口按钮}" Click="最小化按钮_Click" ToolTip="最小化">
+                            <Path Data="M3,7.5 H11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                        </Button>
+                        <Button x:Name="最大化按钮" Style="{StaticResource 窗口按钮}" Click="最大化按钮_Click" ToolTip="最大化">
+                            <Path x:Name="最大化图标" Data="M3.5,3.5 H10.5 V10.5 H3.5 Z"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" StrokeLineJoin="Round" />
+                        </Button>
+                        <Button x:Name="关闭按钮" Style="{StaticResource 关闭按钮}" Click="关闭按钮_Click" ToolTip="关闭">
+                            <Path Data="M3.5,3.5 L10.5,10.5 M10.5,3.5 L3.5,10.5"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ==================== 页签栏 ==================== -->
+        <Border x:Name="页签区" Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
+                BorderThickness="0,0,0,1" Padding="20,12">
+            <ItemsControl x:Name="页签控件" ItemsSource="{Binding 页签列表}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <!-- 用 UniformGrid 而不是 WrapPanel：WrapPanel 在窄窗口会换行，
+                             页签区高度一变，整窗内容高度跟着变，窗口就会被撑破屏幕 -->
+                        <UniformGrid Columns="6" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ToggleButton Style="{StaticResource ShiftTab}"
+                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      Click="页签按钮_Click"
+                                      Tag="{Binding 序号}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding 名称}" FontSize="13" />
+                                <TextBlock Text="{Binding 日期}" FontSize="10.5" Foreground="{DynamicResource Text3Brush}"
+                                           Margin="0,1,0,0" />
+                            </StackPanel>
+                        </ToggleButton>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- ==================== KPI 卡片区 ==================== -->
+        <ItemsControl x:Name="KPI区" Grid.Row="2" ItemsSource="{Binding KPI列表}" Margin="20,12,20,4">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <!-- KPI 一行 6 张（用户要求：红框区域一行显示，不分两行） -->
+                    <UniformGrid Columns="6" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Style="{StaticResource Card}" Margin="0,0,14,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <!-- 左侧主色竖条 -->
+                            <Border Grid.Column="0" Width="3" CornerRadius="2" Margin="0,2,12,2"
+                                    Background="{DynamicResource AccentGradientBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource KpiIconBox}" Margin="0,0,8,0">
+                                        <Path Data="{Binding 图标路径}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2"
+                                              Fill="Transparent" Stretch="Uniform" Width="14" Height="14"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="{Binding 标题}" Style="{StaticResource CardTitleText}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding 数值}" Style="{StaticResource KpiValueText}" />
+                                    <TextBlock Text="{Binding 单位}" Style="{StaticResource KpiUnitText}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding 副说明}" Style="{StaticResource CaptionText}" Margin="0,6,0,0"
+                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- ==================== 主体：表格 + 右侧栏 ==================== -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <!-- 右侧栏宽度随窗口宽度自动调整（代码里 280 / 300 / 320 三档） -->
+                <ColumnDefinition x:Name="右侧栏列" Width="280" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 主表格 -->
+            <!-- 表格卡片：不画右边框（表格最后一列的竖线就是右边界，避免两条线紧挨着） -->
+            <Border x:Name="表格卡片" Grid.Column="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="0" Margin="20,12,12,16" CornerRadius="18" Padding="0">
+                <DataGrid x:Name="表格" ItemsSource="{Binding 表格行}" Margin="6,6,6,6">
+                    <DataGrid.Columns>
+                        <!-- 时段列固定宽度，其余 9 列用 * 均分剩余空间：窗口再窄也一屏显示完，不出横向滚动条 -->
+                        <DataGridTextColumn Header="时段" Binding="{Binding Period}" Width="92" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="小时产能(PCS)" Binding="{Binding Total}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="OK产能(PCS)" Binding="{Binding Ok}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="NG产能(PCS)" Binding="{Binding Ng}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="良率%" Binding="{Binding Yield}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="生产时间(Min)" Binding="{Binding Production}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="待料时间(Min)" Binding="{Binding Wait}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="报警时间(Min)" Binding="{Binding Alarm}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="停止时间(Min)" Binding="{Binding Stop}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        <DataGridTextColumn Header="稼动率%" Binding="{Binding Utilization}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+
+            <!-- 右侧栏（外面套 ScrollViewer：窗口被缩小时内容可滚动，不会被裁掉，
+                 同时右栏三张卡片的高度不再撑大整个窗口） -->
+            <ScrollViewer x:Name="右栏滚动" Grid.Column="1" Margin="0,12,20,16"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- 设备状态 -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock x:Name="设备状态标题" Text="设备状态" Style="{StaticResource CardTitleText}" HorizontalAlignment="Left" />
+                            <TextBlock x:Name="设备状态徽标" Text="运行中" HorizontalAlignment="Right"
+                                       Foreground="{DynamicResource OkBrush}" FontWeight="SemiBold" FontSize="12.5" />
+                        </Grid>
+                        <Grid Margin="0,9,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="自动中标题" Text="设备自动中" Foreground="{DynamicResource TextBrush}" FontSize="13" />
+                                <TextBlock Text="M3200" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <TextBlock x:Name="自动中文字" Grid.Column="1" Text="停止" FontSize="13" />
+                        </Grid>
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="报警标题" Text="设备报警" Foreground="{DynamicResource TextBrush}" FontSize="13" />
+                                <TextBlock Text="M3201" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <TextBlock x:Name="报警文字" Grid.Column="1" Text="正常" FontSize="13" />
+                        </Grid>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock x:Name="稼动率标题" Text="本班稼动率" Foreground="{DynamicResource TextBrush}" FontSize="13" />
+                                <!-- 说明文字：一行显示完、左侧与"本班稼动率"对齐（不能设 MaxWidth，
+                                 设了 Stretch 会退化成居中，文字就比标题缩进了一截） -->
+                            <TextBlock x:Name="稼动率说明" Text="生产 ÷（生产+待料+报警+停止）" Style="{StaticResource CaptionText}"
+                                       FontSize="10" Margin="0,3,0,0" TextWrapping="NoWrap" />
+                            </StackPanel>
+                            <!-- 稼动率圆环（StrokeDashArray 画弧，借鉴 galaxy 加载环的霓虹描边） -->
+                            <Grid Grid.Column="1" Width="46" Height="46" HorizontalAlignment="Right">
+                                <Ellipse Stroke="{DynamicResource LineBrush}" StrokeThickness="5" />
+                                <Ellipse x:Name="稼动率弧" Stroke="{DynamicResource AccentBrush}" StrokeThickness="5"
+                                         StrokeDashArray="0 145" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse.RenderTransform>
+                                        <RotateTransform Angle="-90" />
+                                    </Ellipse.RenderTransform>
+                                </Ellipse>
+                                <TextBlock x:Name="稼动率文字" Text="0.0" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" FontFamily="Consolas, Microsoft YaHei UI"
+                                           FontWeight="Bold" FontSize="11.5" Foreground="{DynamicResource TextBrush}" />
+                            </Grid>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 三单元状态 -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                    <StackPanel>
+                        <TextBlock x:Name="单元栏标题" Text="单元状态 / 本班统计" Style="{StaticResource CardTitleText}" Margin="0,0,0,6" />
+                        <ItemsControl ItemsSource="{Binding 单元列表}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,7">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Text="{Binding 名称}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="13" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Row="1" Text="{Binding 地址}" Style="{StaticResource CaptionText}"
+                                                   Margin="0,2,0,0" />
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
+                                            <Border Background="{DynamicResource OkSoftBrush}" CornerRadius="10" Padding="8,2" Margin="0,0,7,0">
+                                                <TextBlock Text="{Binding OK文字}" Foreground="{DynamicResource OkBrush}"
+                                                           FontSize="11" FontWeight="Bold" />
+                                            </Border>
+                                            <Border Background="{DynamicResource NgSoftBrush}" CornerRadius="10" Padding="8,2" Margin="0,0,7,0">
+                                                <TextBlock Text="{Binding NG文字}" Foreground="{DynamicResource NgBrush}"
+                                                           FontSize="11" FontWeight="Bold" />
+                                            </Border>
+                                            <Border Background="{DynamicResource IdleSoftBrush}" CornerRadius="10" Padding="8,2">
+                                                <TextBlock Text="{Binding 状态文字}" Foreground="{DynamicResource IdleBrush}"
+                                                           FontSize="11" FontWeight="Bold" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- 提示卡（报警 / 离线） -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock x:Name="提示标题" Text="提示" Style="{StaticResource CardTitleText}" Margin="0,0,0,6" />
+                        <Border x:Name="提示框" Background="{DynamicResource AccentSoftBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" CornerRadius="10"
+                                Padding="11,9">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="提示指示灯" Width="8" Height="8" Fill="{DynamicResource AccentBrush}"
+                                         VerticalAlignment="Center" Margin="0,0,9,0" />
+                                <TextBlock x:Name="提示文字" Text="数据正常" Foreground="{DynamicResource AccentBrush}"
+                                           FontSize="12.5" TextWrapping="Wrap" MaxWidth="230" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ==================== 底部状态条 ==================== -->
+        <Border x:Name="状态条区" Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
+                BorderThickness="0,1,0,0" Padding="20,10">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="状态灯" Width="11" Height="11" Fill="{DynamicResource WarnBrush}"
+                             VerticalAlignment="Center" Margin="0,0,11,0" />
+                    <TextBlock x:Name="状态条文字" Text="设备暂停中!" FontSize="13.5" FontWeight="Bold"
+                               Foreground="{DynamicResource WarnBrush}" />
+                </StackPanel>
+                <TextBlock x:Name="底栏信息" HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Style="{StaticResource CaptionText}"
+                           Text="采样 100ms · 最近落盘 -- · 日志 logs\运行日志_日期.log" />
+            </Grid>
+        </Border>
+        </Grid>
+    </Border>
+    </Grid>
+</Window>

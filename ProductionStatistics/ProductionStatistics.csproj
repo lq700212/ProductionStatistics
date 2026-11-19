@@ -1,0 +1,87 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    生产统计 WPF 版主工程（.NET Framework 4.7.2 + WPF）
+    为什么用 SDK-style 工程：纯 .NET SDK 的 MSBuild 不为"传统 csproj"加载 WPF 的 WinFX.targets
+    （XAML 不会被编译，InitializeComponent 与 x:Name 控件全部丢失），SDK-style + UseWPF 才是
+    dotnet SDK 下编译 WPF 的正确姿势。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>ProductionStatistics</RootNamespace>
+    <!--
+      exe 名沿用现场交付名 ProductionStatistics.Wpf.exe：快捷方式、三份培训文档、
+      DocShot 截图工具链（按进程名查找/结束）都按这个名字写死，改名只会增加现场
+      返工面。工程目录/解决方案名已去掉 .Wpf 后缀，程序集名保留以维持交付一致。
+    -->
+    <AssemblyName>ProductionStatistics.Wpf</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- exe 图标（桌面快捷方式 / 资源管理器 / 任务栏的 exe 图标都取这里） -->
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <LangVersion>7.3</LangVersion>
+    <Version>2.2.1.0</Version>
+    <FileVersion>2.2.1.0</FileVersion>
+    <AssemblyVersion>2.2.1.0</AssemblyVersion>
+    <Platforms>AnyCPU</Platforms>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- WPF 没有 winres 资源，避免 SDK 默认去找 Properties\Resources.resx 而报错 -->
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="HslCommunication">
+      <HintPath>..\HslCommunication.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="EPPlus">
+      <HintPath>..\EPPlus.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      kaleidoscope 通用库（git submodule，位于 extern\kaleidoscope；克隆仓库后先还原子模块
+      （git submodule update 带 init 与 recursive 参数），再构建主工程即自动连带编译）：
+        · Kaleidoscope —— 设备通讯通用库（本工程用其 HslPlcClient 多品牌 PLC 封装 +
+          HslAuthorization 授权注册 + LogHelper 日志桥）；
+        · Kaleidoscope.UI —— WPF 复用控件库（圆角弹窗基类/按钮输入族/主题键板，
+          本工程合并其缺省键板与样式字典）。
+      两库均为 net472 兼容产物；ProjectReference 直连源码工程，改动 submodule 后重编主工程即生效。
+    -->
+    <ProjectReference Include="..\extern\kaleidoscope\Kaleidoscope\Kaleidoscope.csproj" />
+    <ProjectReference Include="..\extern\kaleidoscope\Kaleidoscope.UI\Kaleidoscope.UI.csproj">
+      <AdditionalProperties>TargetFramework=net472</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      图标资源（放在 Resources\ 目录，职责分明）：
+        · Resources\app.ico —— Windows 图标（多尺寸：16/24/32/48/64/128/256），
+          既作 exe 图标（ApplicationIcon，桌面快捷方式/资源管理器显示的就是它），
+          也作 WPF 资源供 XAML 用 pack URI 引用（任务栏、窗口图标）。
+        · Resources\app.png —— 原始大图（625x625 RGBA），界面里要用高清图时用它。
+      注意：SDK-style 工程默认**不会**把 .ico/.png 当资源收录，必须显式声明。
+    -->
+    <Resource Include="Resources\app.ico" />
+    <Resource Include="Resources\app.png" />
+  </ItemGroup>
+
+  <Target Name="CopyIconToOutput" AfterTargets="Build">
+    <!-- 把 app.ico 再复制一份到 exe 目录：现场手工建桌面快捷方式时可直接选这个文件 -->
+    <Copy SourceFiles="Resources\app.ico" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="Resources\app.png" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!--
+    业务代码已从原 WinForms 工程迁入本工程 Business\ 目录（SDK 默认 glob 会自动收录，
+    无需显式 Compile Include）。命名空间沿用 ProductionStatistics，代码零改动。
+  -->
+</Project>

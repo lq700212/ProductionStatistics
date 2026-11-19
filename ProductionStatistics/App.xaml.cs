@@ -1,0 +1,88 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Windows;
+using System.Windows.Threading;
+
+namespace ProductionStatistics
+{
+    /// <summary>
+    /// WPF 应用入口：负责日志系统初始化、全局异常兜底、主题（深/浅）切换。
+    ///
+    /// 做什么：
+    ///   ① 启动即初始化运行日志（logs 文件夹），任何后续异常都留得下痕迹；
+    ///   ② 挂 UI 线程异常与 AppDomain 未处理异常，异常不再"无声瘫痪"；
+    ///   ③ 主题切换：把 Application 资源里合并的主题字典换成另一套（Light/Dark），
+    ///      控件样式里的颜色全是 DynamicResource，所以换完立即全界面生效，窗口不用重建。
+    ///
+    /// 主题来源：生产统计.ini 的 [界面] 主题=深色/浅色（缺省跟随系统）。
+    /// </summary>
+    public partial class App : Application
+    {
+        /// <summary>主题名：深色 / 浅色（对应 Themes\Dark.xaml、Themes\Light.xaml）</summary>
+        public const string 深色主题 = "深色";
+        public const string 浅色主题 = "浅色";
+
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            // ① 日志系统先起来，后面任何一步出问题都能留痕
+            Log.Init();
+            Log.Info("WPF 程序启动: 版本=" + typeof(App).Assembly.GetName().Version);
+
+            // ② 全局异常兜底：UI 线程异常弹框提示（程序不退出），未处理异常记日志
+            DispatcherUnhandledException += (s, ex) =>
+            {
+                // 记 InnerException：WPF 的 XAML 加载异常外面裹了一层 TargetInvocationException，
+                // 只记外层看不到真正原因（踩过：窗口起不来，日志里只有"调用的目标发生了异常"）
+                Log.Error("UI线程异常: " + ex.Exception.Message, ex.Exception.InnerException ?? ex.Exception);
+                MessageBox.Show("发生错误：" + ex.Exception.Message
+                    + "\n详情见 exe 目录 logs 文件夹 与 错误日志.txt", "生产统计",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ex.Handled = true; // 记完日志继续跑，不让现场因为一个弹框就停摆
+            };
+            AppDomain.CurrentDomain.UnhandledException += (s, ex) =>
+                Log.Error("未处理异常", ex.ExceptionObject as Exception);
+
+            // ③ 读配置并应用主题（在窗口创建之前，窗口出来就是对的配色）
+            AppConfig.载入();
+            切换主题(AppConfig.取主题());
+        }
+
+        /// <summary>
+        /// 切换主题：把 Application.Current.Resources 里合并的主题字典换成指定的那本。
+        /// 颜色全部走 DynamicResource，所以换字典 = 全界面换肤，无需重建窗口。
+        /// </summary>
+        public static void 切换主题(string 主题名)
+        {
+            string 文件 = (主题名 == 深色主题) ? "Dark.xaml" : "Light.xaml";
+            try
+            {
+                ResourceDictionary 新字典 = new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/Themes/" + 文件, UriKind.Absolute)
+                };
+                var 集合 = Application.Current.Resources.MergedDictionaries;
+                // 先把旧的主题字典摘掉。
+                //【V2.2.2 注意】这里只能删"本工程"的主题字典（Themes\Light|Dark.xaml，相对路径
+                // Source 不含 ";component"）——kaleidoscope 的缺省键板/控件族字典 pack URI 里也含
+                // "/Themes/"，误删后 Kaleidoscope.UI 的语义键会静默失效（DynamicResource 缺键不报错）。
+                for (int i = 集合.Count - 1; i >= 0; i--)
+                {
+                    var 源 = 集合[i].Source;
+                    if (源 != null && 源.OriginalString.Contains("/Themes/")
+                        && !源.OriginalString.Contains(";component")) 集合.RemoveAt(i);
+                }
+                集合.Add(新字典);
+                Log.Info("主题已切换为: " + 主题名);
+            }
+            catch (Exception ex)
+            {
+                // 换主题失败不该让程序起不来：保留原主题继续跑
+                Log.Error("切换主题失败", ex);
+            }
+        }
+    }
+}

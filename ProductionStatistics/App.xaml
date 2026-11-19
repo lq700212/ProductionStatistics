@@ -1,0 +1,23 @@
+<Application x:Class="ProductionStatistics.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Kaleidoscope.UI 缺省键板（Brush.* 语义键缺省值）：
+                     本工程 Themes\Light|Dark.xaml 会按同名键覆盖它——合并顺序在前的先加、
+                     在后的覆盖，所以本工程主题字典放后面即可完成"宿主键优先"。 -->
+                <ResourceDictionary Source="pack://application:,,,/Kaleidoscope.UI;component/Themes/DefaultLight.xaml" />
+                <!-- Kaleidoscope.UI 控件族样式（GhostButton/FreshButton/KxTextBox/StatusChip 等，
+                     全 keyed 样式：需要时在 XAML 里 Style="{StaticResource FreshButton}" 直接用） -->
+                <ResourceDictionary Source="pack://application:,,,/Kaleidoscope.UI;component/Themes/FreshStyles.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/Kaleidoscope.UI;component/Themes/ShellStyles.xaml" />
+                <!-- 主题字典：只放颜色（键名两套主题完全一致），切主题 = 换这一本字典 -->
+                <ResourceDictionary Source="Themes/Light.xaml" />
+                <!-- 全局控件样式：颜色一律走 DynamicResource，切主题时样式自动跟随 -->
+                <ResourceDictionary Source="Controls/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

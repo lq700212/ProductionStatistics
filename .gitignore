@@ -1,0 +1,54 @@
+# ======================================================================
+# 生产统计（点胶固化收料机）· Git 忽略规则
+# 工程为单项目 WPF：根目录 = sln + ProductionStatistics\ 工程 + docs\ + tools\
+# 注意：根目录的 EPPlus.dll / HslCommunication.dll 是编译依赖，必须入库，
+#       因此不要写全局 `*.dll` 规则。
+# ======================================================================
+
+# ---------------- 编译产物 ----------------
+ProductionStatistics/bin/
+ProductionStatistics/obj/
+*.pdb
+*.cache
+*.tlog
+*.ilk
+
+# ---------------- Visual Studio 用户文件 ----------------
+.vs/
+*.suo
+*.user
+*.csproj.user
+*.sln.docstates
+
+# ---------------- 运行数据（现场生成，不入库） ----------------
+# 程序默认输出/运行在 bin\Debug\net472 下，已被 bin/ 整目录忽略；
+# 以下规则兜住从现场手工拷回根目录的同类文件。
+数据/
+logs/
+Logs/
+错误日志.txt
+生产统计.ini
+
+# ---------------- 商业机密（严禁入库/外传） ----------------
+# hsl.dat = HslCommunication 商业授权码文件（kaleidoscope.Utils.HslAuthorization 格式，
+# exe 同目录读取；同机密级别的还有 HslLicense.dat）。泄密=授权码公开，
+# 任何路径变体都挡住，新增目录部署时在这里补一行。
+hsl.dat
+HslLicense.dat
+
+# ---------------- 临时 / 系统 ----------------
+*.bak
+*.tmp
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------------- 工具缓存 ----------------
+.codegraph/
+.opencode/
+
+# ---------------- 工具构建产物 ----------------
+# tools\DocShot\build\ 是 csc 编译输出（FakePlc.exe / 中间产物），不入库；
+# HslCommunication.dll 源件在仓库根入库，build 目录里的是编译期拷贝。
+tools/DocShot/build/
