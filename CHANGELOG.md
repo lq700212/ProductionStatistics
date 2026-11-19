@@ -1,5 +1,44 @@
 # 更新记录
 
+## v0.0.3 · 2026-11-19 · 目录规范化：第三方二进制依赖统一收进 `libs/`
+
+> 起因：仓库根目录直接躺着 `EPPlus.dll` / `HslCommunication.dll` 两个第三方二进制，
+> 与 sln、README 混排；`tools/DocShot` 编译 FakePlc 又引用一份 `build\HslCommunication.dll`，
+> 但没有任何"从哪来"的步骤——新环境克隆后 build 目录为空，编译直接失败。
+> 本轮只调整文件放置与引用路径，不改任何运行逻辑。
+
+### 目录调整
+
+- 新增 `libs/` 目录：**第三方二进制依赖的唯一存放地**，用 `git mv` 移入
+  `EPPlus.dll`、`HslCommunication.dll`（保留 git 历史）。
+- 目录职责就此固定：`libs/` = 二进制依赖；`extern/` = 源码级依赖（kaleidoscope submodule，
+  其内部 `libs/` 由子模块自己管）；`tools/` = 开发工具链（产物走 gitignore 的 `build/`）。
+- 移动前三处 `HslCommunication.dll` 实测 SHA256 完全一致（原仓库根 / DocShot build / kaleidoscope libs），
+  本次统一后主工程与 FakePlc 都引用 `libs/` 同一份，避免"软件用一份、假 PLC 用另一份"的版本漂移。
+
+### 引用路径同步
+
+- `ProductionStatistics/ProductionStatistics.csproj`：两条 `HintPath` 改为
+  `..\libs\HslCommunication.dll` / `..\libs\EPPlus.dll`，并补注释说明 `libs\` 职责与
+  `Private=True` 自动带出到 bin 的行为。
+- `tools/E2ETests/Run-E2ETests.ps1`：编译 FakePlc 的 `/reference` 改为 `$root\libs\HslCommunication.dll`。
+- `tools/DocShot/README.md`：编译 FakePlc 改为 `/r:libs\HslCommunication.dll`，
+  并补上遗漏的运行时步骤——`copy libs\HslCommunication.dll tools\DocShot\build\`
+  （csc 的 `/r` 只编译期引用、不复制文件，FakePlc.exe 运行时必须在同目录找到该 DLL）。
+- `.gitignore`：头部目录职责注释同步（根目录 DLL → `libs/`），并修正 `build/` 那段
+  "源件在仓库根"的过期说明。
+- `AGENTS.md`：关键文件导航补 `libs/*.dll` 与 `extern/` 两行；FakePlc 编译命令 reference 改 `libs\`。
+- `README.md`：目录结构树补 `libs/` 并注明"必须入库"。
+- `docs/03_内部版_生产统计.md`：截图工具链编译命令改从项目根执行、引用 `libs\`，
+  与 DocShot README 对齐（PDF 同步重新生成）。
+
+### 验证
+
+- `dotnet build` 0 error；构建产物 `bin\Debug\net472` 中 `HslCommunication.dll` / `EPPlus.dll`
+  正常带出。
+- 用新路径手工编译 `FakePlc.cs` 通过（csc exit=0）。
+- 端到端回归 `tools/E2ETests/Run-E2ETests.ps1` 全量通过（7 组用例断言不变）。
+
 ## v0.0.2 · 2026-11-19 · 主窗 UI 真接入 Kaleidoscope.UI（基类 + 控件族 + 主题契约）
 
 > 上一版只是"引用库程序集"，本轮把主窗真正落到库的基类与控件族上：

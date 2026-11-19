@@ -1,8 +1,11 @@
 # ======================================================================
 # 生产统计（点胶固化收料机）· Git 忽略规则
-# 工程为单项目 WPF：根目录 = sln + ProductionStatistics\ 工程 + docs\ + tools\
-# 注意：根目录的 EPPlus.dll / HslCommunication.dll 是编译依赖，必须入库，
-#       因此不要写全局 `*.dll` 规则。
+# 工程为单项目 WPF：根目录 = sln + ProductionStatistics\ 工程 + libs\ + extern\ + docs\ + tools\
+# 目录职责：
+#   libs\   第三方二进制依赖（EPPlus.dll / HslCommunication.dll），必须入库；
+#   extern\ 源码级依赖（kaleidoscope submodule，自带 libs\）；
+#   tools\  开发工具链（编译产物走各自的 build\/run\ 目录，不入库）。
+# 注意：libs\ 下的 DLL 是编译依赖，不要写全局 `*.dll` 规则。
 # ======================================================================
 
 # ---------------- 编译产物 ----------------
@@ -52,5 +55,14 @@ Desktop.ini
 
 # ---------------- 工具构建产物 ----------------
 # tools\DocShot\build\ 是 csc 编译输出（FakePlc.exe / 中间产物），不入库；
-# HslCommunication.dll 源件在仓库根入库，build 目录里的是编译期拷贝。
+# HslCommunication.dll 的源件在仓库根 libs\ 入库，build 目录里的是编译命令
+# 末尾从 libs\ 拷过去的运行时副本，因此整目录忽略不会丢依赖。
 tools/DocShot/build/
+
+# ---------------- 工具运行产物（跑完手工清理，不入库） ----------------
+# E2E 回归的运行目录：脚本默认跑完就删，-KeepOutput 排障或中断时会留下
+tools/E2ETests/run/
+# DocShot 运行期产物：现场备份、PDF 抽检图、控制台日志
+tools/DocShot/backup_*/
+tools/DocShot/preview/
+tools/DocShot/docshot_console*.txt

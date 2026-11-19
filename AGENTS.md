@@ -109,7 +109,10 @@
 | `ProductionStatistics/Themes/Light|Dark.xaml` | 两套主题色板（键名一致，切主题=换字典） |
 | `extern/kaleidoscope/` | 通讯/UI 通用库（submodule，改动走子模块自己的提交流程） |
 | `tools/DocShot/` | 文档截图 harness（FakePlc 假 PLC / 核验脚本 / PDF 转换） |
-| `00_运行目录约定` | exe 运行需带：`HslCommunication.dll`、`EPPlus.dll`、`Kaleidoscope.dll`、`Kaleidoscope.UI.dll`、`hsl.dat`、`生产统计.ini` |
+| `libs/HslCommunication.dll` | 三菱 MC 3E 通讯库（商业授权；csproj 与 tools 的 FakePlc 都引用这一份，禁止各处私拷贝） |
+| `libs/EPPlus.dll` | Excel 导出库（4.x LGPL 版，不要升 5+ 商业授权版） |
+| `extern/` | 源码级依赖目录（当前只有 kaleidoscope submodule，其 libs/ 由子模块自己管） |
+| `部署运行目录（非仓库文件）` | exe 运行需带：`HslCommunication.dll`、`EPPlus.dll`、`Kaleidoscope.dll`、`Kaleidoscope.UI.dll`、`hsl.dat`、`生产统计.ini` |
 
 ## 构建与验证命令
 
@@ -122,7 +125,7 @@ dotnet build ProductionStatistics\ProductionStatistics.csproj -c Debug
 # ① 编译 FakePlc（注意 /codepage:65001，否则中文字符串乱码）
 $csc='C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 & $csc /nologo /codepage:65001 /target:exe /out:tools\DocShot\build\FakePlc.exe `
-  /reference:"E:\Project\ProductionStatistics\HslCommunication.dll" tools\DocShot\FakePlc.cs
+  /reference:"E:\Project\ProductionStatistics\libs\HslCommunication.dll" tools\DocShot\FakePlc.cs
 # ② 部署测试目录：bin\Debug\net472 全套 + hsl.dat + 生产统计.ini（IP 改 127.0.0.1）
 # ③ 起 FakePlc（6060）→ 起软件 → 看 logs：授权激活/合并读=1/时间账目差额=0/
 #    本分钟产量≈33（脉冲源节拍 1.8s×3 单元）

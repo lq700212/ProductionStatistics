@@ -1,6 +1,6 @@
 # DocShot —— 生产统计培训文档截图与交付流水线
 
-本目录是「生产统计（WPF 0.0.2）」三份培训文档的配套工具链：用**真 exe + 假 PLC**
+本目录是「生产统计（WPF 0.0.3）」三份培训文档的配套工具链：用**真 exe + 假 PLC**
 跑真实采集/统计/落盘，再截图、后处理、核验、转 PDF。禁止 P 图，截图里的数字都来自
 真实运行路径，图注统一标注「演示数据」。
 
@@ -22,7 +22,7 @@
 | `check_config.py` | 核验配置的唯一事实源：功能边界、硬件、禁词、必需章节、图片白名单、ini/版本/源码常量自检 |
 | `check_docs.py` | 三份文档 + 截图 + PDF 的全量核验（调用 `check_config.py`） |
 | `md_to_pdf.py` | Markdown → HTML → Edge 无头打印 PDF，带 A4 版式与图注绑定 |
-| `build/` | 编译产物：`DocShot.exe`、`FakePlc.exe`、`HslCommunication.dll` |
+| `build/` | 编译产物：`DocShot.exe`、`FakePlc.exe`、`HslCommunication.dll`（运行时拷贝，编译命令末尾从 `libs\` 复制） |
 
 运行期还会生成 `backup_<时间戳>/`（现场备份）和 `preview/`（PDF 抽检图），
 交付前按第 8 节清理。
@@ -48,8 +48,12 @@ set REF=C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFram
 
 "%CSC%" /nologo /target:exe /codepage:65001 ^
   /out:tools\DocShot\build\FakePlc.exe ^
-  /r:tools\DocShot\build\HslCommunication.dll ^
+  /r:libs\HslCommunication.dll ^
   tools\DocShot\FakePlc.cs
+
+rem FakePlc.exe 运行时需要 HslCommunication.dll 在它自己目录（csc 的 /r 只编译期引用，
+rem 不会复制文件），从仓库统一的 libs\ 拷一份到 build\，保证与主程序同版本：
+copy /Y libs\HslCommunication.dll tools\DocShot\build\ >nul
 ```
 
 ## 3. 拍摄前检查
@@ -117,7 +121,7 @@ python tools\DocShot\check_docs.py
 - `postprocess.py`：只处理宽度 ≥2000 的大图做四角泛洪清近黑像素（阈值 24，
   单角上限 5000）；所有图片先裁掉整行/整列 99% 近黑的外圈（本机实测 09/10 各 7 px，
   随 DPI 与窗口边框在 7~10 px 间浮动），宽度超过 1800 的等比缩到 1800（小图不放大）。
-- `check_config.py --strict`：ini 现场值、工程版本 0.0.2、源码常量抽查；
+- `check_config.py --strict`：ini 现场值、工程版本 0.0.3、源码常量抽查；
   失败返回非 0，可单独当“拍摄后现场是否还原”的守门员。
 - `check_docs.py`：文档编码/字数/表格/图片/章节/禁词/否定语境/PLC 地址键/
   内部版源码定位/PDF 体积与文件头/HTML 残留，一次跑完。

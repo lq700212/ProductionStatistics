@@ -4,7 +4,7 @@
 
 **运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → CSV 落盘 → Excel 导出，一条龙。**
 
-![version](https://img.shields.io/badge/version-v0.0.2-2C7BE5)
+![version](https://img.shields.io/badge/version-v0.0.3-2C7BE5)
 ![framework](https://img.shields.io/badge/.NET_Framework-4.7.2-5C2D91?logo=dotnet)
 ![platform](https://img.shields.io/badge/platform-Windows_10_11-0078D6?logo=windows11)
 ![plc](https://img.shields.io/badge/PLC-三菱_FX5U_MC协议-FF6A00)
@@ -116,7 +116,8 @@ ProductionStatistics/                    # 仓库根
 │   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / Log
 │   ├── ViewModels/ Controls/ Themes/    # 表格行模型 / 样式 / 两套主题色板
 │   └── Resources/                       # exe 图标
-├── extern/kaleidoscope/                 # ★ 公司通讯/UI 通用库（git submodule）
+├── libs/                                # 第三方二进制依赖（HslCommunication / EPPlus，必须入库）
+├── extern/kaleidoscope/                 # ★ 公司通讯/UI 通用库（git submodule，源码级依赖）
 │   ├── Kaleidoscope/                    #   设备通讯库（HslAuthorization 授权 / HslPlcClient 多品牌 PLC / 日志桥）
 │   └── Kaleidoscope.UI/                 #   WPF 复用控件库（键板 / Fresh·Kx 控件族 / 圆角窗基类）
 ├── docs/                                # 三份培训文档（操作员/客户技术/内部版）+ 截图

@@ -130,7 +130,7 @@ $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $fakeSrc = Join-Path $root "tools\DocShot\FakePlc.cs"
 $fakeExe = Join-Path $run "FakePlc.exe"
 & $csc /nologo /codepage:65001 /target:exe /out:$fakeExe `
-    /reference:"$root\HslCommunication.dll" $fakeSrc | Out-Null
+    /reference:"$root\libs\HslCommunication.dll" $fakeSrc | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "FakePlc 编译失败" }
 
 # 模式文件：normal = 每 1.8s 一脉冲轮转三单元，每 12 件夹 1 NG（≈33 件/分钟，确定性脉冲源）

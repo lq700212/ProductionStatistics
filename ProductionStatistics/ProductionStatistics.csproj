@@ -20,9 +20,9 @@
     <!-- exe 图标（桌面快捷方式 / 资源管理器 / 任务栏的 exe 图标都取这里） -->
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <LangVersion>7.3</LangVersion>
-    <Version>0.0.2</Version>
-    <FileVersion>0.0.2</FileVersion>
-    <AssemblyVersion>0.0.2</AssemblyVersion>
+    <Version>0.0.3</Version>
+    <FileVersion>0.0.3</FileVersion>
+    <AssemblyVersion>0.0.3</AssemblyVersion>
     <Platforms>AnyCPU</Platforms>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
@@ -31,12 +31,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      第三方二进制依赖统一放仓库根 libs\（不在工程目录内、也不散落根目录）：
+        · libs\HslCommunication.dll —— 三菱 MC 3E 通讯库（商业授权，授权码见 hsl.dat，不入库）；
+        · libs\EPPlus.dll —— Excel 导出库（4.x LGPL 版，不要升级到 5+ 商业授权版）。
+      Private=True 让构建把两个 DLL 自动带进 exe 输出目录，现场部署直接拷贝 bin 产物即可。
+      tools\E2ETests、tools\DocShot 编译 FakePlc 时也引用同一份 libs\HslCommunication.dll，
+      保证"软件用的库"和"假 PLC 用的库"永远同版本。
+    -->
     <Reference Include="HslCommunication">
-      <HintPath>..\HslCommunication.dll</HintPath>
+      <HintPath>..\libs\HslCommunication.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="EPPlus">
-      <HintPath>..\EPPlus.dll</HintPath>
+      <HintPath>..\libs\EPPlus.dll</HintPath>
       <Private>True</Private>
     </Reference>
   </ItemGroup>
