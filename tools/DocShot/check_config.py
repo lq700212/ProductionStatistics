@@ -48,7 +48,7 @@ IMAGES_DIR = DOCS_DIR / "images"
 APP_NAME = "生产统计"
 APP_NAME_EN = "Production Statistics"
 TARGET = "点胶固化收料机"
-DELIVERY_VERSION = "0.0.4"
+DELIVERY_VERSION = "0.0.5"
 
 # 三份文档：key 供 check_docs.py 引用，file 必须与实际文件名一致
 DOCUMENTS = {
@@ -94,10 +94,13 @@ FEATURES = {
     "three_unit_count": True,           # 焊接 / 气密 / 贴标 三单元 OK/NG/IDLE
     "twelve_hour_table": True,          # 每班 12 行小时明细 + 合计
     "six_shift_tabs": True,             # 今天/昨天/前天的白班+夜班
+    "history_query_tab": True,          # 【V2.3.1】第 7 页签：日期区间 + 单元筛选查库、导出 CSV
     "day_night_shift": True,            # 08:00 / 20:00 固定班次
     "auto_reset_signal": True,          # 9 个自锁位读 true 后写回 false
-    "csv_persist": True,                # 每 30 秒整文件覆盖
-    "csv_autoload": True,               # 启动载入今天/昨天/前天
+    "db_persist": True,                 # 【V2.3.1】SQLite 主存储，每 30 秒 UPSERT（WAL）
+    "db_autoload": True,                # 【V2.3.1】启动从库载入最近三天续算
+    "db_csv_import": True,              # 【V2.3.1】库为空时自动一次性导入旧版按天 CSV（幂等）
+    "csv_export_history": True,         # 【V2.3.1】历史查询结果导出 CSV（CSV 已不是主存储）
     "excel_export": True,               # EPPlus，导出整天两班
     "bilingual_ui": True,               # 中文 / English 运行中切换
     "dark_light_theme": True,           # 深色 / 浅色
@@ -107,11 +110,11 @@ FEATURES = {
     "offline_detect": True,             # 通讯失败 → 离线
     "rolling_log": True,                # 按天日志，保留 30 天
     "error_log_mirror": True,           # ERROR 镜像到 错误日志.txt
-    "single_instance_guard": False,     # 未实现！双开互相覆盖 CSV
+    "single_instance_guard": False,     # 未实现！双开会争抢 SQLite 库
     "login_permission": False,          # 无账号 / 权限 / 授权体系
     "mes_integration": False,
     "recipe_management": False,
-    "database": False,                  # 纯 CSV 文件
+    "database": True,                   # 【V2.3.1】SQLite 单文件库（数据\生产统计.db，WAL）
     "camera_vision": False,
     "barcode_scanner": False,
     "spc_oee": False,
@@ -138,11 +141,12 @@ RUNTIME = {
     "poll_interval_ms": 100,
     "signal_off_rounds": 2,
     "min_count_interval_ms": 1500,
-    "csv_flush_seconds": 30,
+    "db_flush_seconds": 30,       # 【V2.3.1】每 30 秒 UPSERT 进 SQLite（原 CSV 30 秒覆盖已停）
     "memory_retain_days": 7,
     "log_retain_days": 30,
-    "csv_columns": 14,
-    "csv_lines_per_day": 25,      # 表头 + 白班 12 + 夜班 12
+    "db_hour_rows_per_day": 24,   # 【V2.3.1】库表一天 24 行小时桶（白班 12 + 夜班 12）
+    "csv_columns": 14,            # 旧版按天 CSV 列数（仅作导入源/查询导出格式）
+    "csv_lines_per_day": 25,      # 表头 + 白班 12 + 夜班 12（同上，导入源口径）
     "export_rows": 27,            # 表头 + 白班 12 + 白班合计 + 夜班 12 + 夜班合计
     "day_shift_start": 8,
     "night_shift_start": 20,
@@ -184,6 +188,7 @@ IMAGE_FILES = [
     "08-main-offline.png",
     "09-export-save-dialog.png",
     "10-export-success.png",
+    "11-history-query.png",
 ]
 
 # 每张图至少被一份文档引用
@@ -227,8 +232,9 @@ FORBIDDEN_HEADING_WORDS_CUSTOMER = [
 ]
 
 # 功能边界词：客户两版允许出现，但必须在否定 / 限定语境里，防止写成「已支持」
+# （【V2.3.1】"数据库"已从本表移除：SQLite 主存储是真的，客户文档可以正面描述）
 NEGATION_REQUIRED_TERMS = [
-    "MES", "配方", "数据库", "OEE", "SPC",
+    "MES", "配方", "OEE", "SPC",
     "相机", "视觉检测", "光源", "扫码枪", "条码枪", "二维码",
     "用户权限", "账号权限", "权限体系", "审计日志",
     "云平台", "远程监控", "邮件报表", "多品牌",

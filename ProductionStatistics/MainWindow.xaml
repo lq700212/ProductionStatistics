@@ -17,11 +17,13 @@
     <!-- ================= 界面布局（ASCII 图，改界面必须同步更新本图） =================
         说明：窗口为**自绘窗口**——去掉系统标题栏（WindowStyle=None + AllowsTransparency=True），
               整个外框做成圆角（外层阴影 Border + 内容层圆角 Border），右上角三个窗口按钮
-              （最小化 / 最大化还原 / 关闭）画在顶栏最右、"导出 Excel" 按钮的右侧。
+              （最小化 / 最大化还原 / 关闭）画在顶栏最右、"导出 Excel" 按钮的右侧；
+              【V2.3.1】留白内的顶栏 / 页签带 / 状态条三块白底也带圆角（详见下方外框结构说明）。
         ┌──────────────────────────────────────────────────────────────────────────────┐
         │ 顶栏 Auto：Logo+标题 │ PLC状态胶囊 时钟 主题开关 中文/English 导出Excel ─ □ ✕ │
-        │ 页签栏 Auto：6 个班次页签（两行文字：班次名+日期，选中主色高亮）            │
+        │ 页签栏 Auto：7 个页签 = 6 班次页签（两行文字：班次名+日期）+ "历史查询"工具  │
         │ KPI 区 Auto：6 张 KPI 卡片（**一行 6 列**，渐变主色竖条 + 大数字 + 副说明）   │
+        │             （选中"历史查询"页签时：KPI 区与主表格隐藏，换成查询面板）      │
         ├───────────────────────────────────────────┬───────────────────────────────┤
         │ 主表格 *：DataGrid 12 小时行 + 合计行      │ 右侧栏 320px                 │
         │  列：时段/小时产能/OK/NG/良率/生产/待料/   │  · 设备状态卡（自动中/报警/   │
@@ -53,6 +55,10 @@
             把顶栏吞成系统标题区——否则导出按钮/主题开关/语言按钮点不到。
           · 四角 12px 圆角留白放在根 Border 的 Padding 里；最大化时由代码把
             Padding/BorderThickness 置 0（圆角由基类同步归零），铺满工作区。
+          · 【V2.3.1】留白内的三块白底内容（顶栏 / 页签带 / 状态条）自带圆角，消除
+            "外壳圆、内容直角"的错位：顶栏圆上缘两角（Fn.ShellRadiusTop）、页签带圆下缘
+            两角（Fn.ShellRadiusBottom）、状态条四角全圆（Fn.ShellRadius）；最大化归零 /
+            还原挂回令牌统一在 窗口_StateChanged。
     -->
     <Border x:Name="窗口内容" CornerRadius="18" BorderThickness="1" Padding="12"
             BorderBrush="{DynamicResource Line2Brush}" Background="{DynamicResource BgBrush}">
@@ -70,8 +76,11 @@
 
         <!-- ==================== 顶栏 ==================== -->
         <!-- 顶栏容器用库 KxTopBar（面板底 + 下边线 + Padding 20,14）；顶栏仍是业务内容，
-             拖动/双击由 MouseLeftButtonDown 手动处理（窗口 CaptionHeight=0）。 -->
+             拖动/双击由 MouseLeftButtonDown 手动处理（窗口 CaptionHeight=0）。
+             CornerRadius【V2.3.1】顶栏白底只圆上缘两角（库令牌 Fn.ShellRadiusTop），
+             与外壳圆角呼应；最大化归零/还原挂回令牌见 窗口_StateChanged。 -->
         <Border x:Name="顶栏区" Grid.Row="0" Style="{StaticResource KxTopBar}"
+                CornerRadius="{DynamicResource Fn.ShellRadiusTop}"
                 MouseLeftButtonDown="标题栏_MouseLeftButtonDown">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -159,14 +168,18 @@
         </Border>
 
         <!-- ==================== 页签栏 ==================== -->
+        <!-- CornerRadius【V2.3.1】页签白带只圆下缘两角（库令牌 Fn.ShellRadiusBottom，
+             本轮新沉淀进库），消除内容块与外壳圆角相接处的直角；最大化归零见 窗口_StateChanged。 -->
         <Border x:Name="页签区" Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
-                BorderThickness="0,0,0,1" Padding="20,12">
+                BorderThickness="0,0,0,1" Padding="20,12"
+                CornerRadius="{DynamicResource Fn.ShellRadiusBottom}">
             <ItemsControl x:Name="页签控件" ItemsSource="{Binding 页签列表}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
                         <!-- 用 UniformGrid 而不是 WrapPanel：WrapPanel 在窄窗口会换行，
-                             页签区高度一变，整窗内容高度跟着变，窗口就会被撑破屏幕 -->
-                        <UniformGrid Columns="6" />
+                             页签区高度一变，整窗内容高度跟着变，窗口就会被撑破屏幕；
+                             7 列 = 6 个班次页签 + 1 个"历史查询"工具页签【V2.3.1】 -->
+                        <UniformGrid Columns="7" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -237,10 +250,15 @@
             </Grid.ColumnDefinitions>
 
             <!-- 主表格 -->
-            <!-- 表格卡片：不画右边框（表格最后一列的竖线就是右边界，避免两条线紧挨着） -->
+            <!-- 表格卡片：不画右边框（表格最后一列的竖线就是右边界，避免两条线紧挨着）；
+                 CornerRadius【V2.3.1】改走库令牌 Fn.ShellCardRadius（值同 18，去硬编码） -->
             <Border x:Name="表格卡片" Grid.Column="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
-                    BorderThickness="0" Margin="20,12,12,16" CornerRadius="18" Padding="0">
-                <DataGrid x:Name="表格" ItemsSource="{Binding 表格行}" Margin="6,6,6,6">
+                    BorderThickness="0" Margin="20,12,12,16" CornerRadius="{DynamicResource Fn.ShellCardRadius}" Padding="0">
+                <!-- ui:KxRoundedClip.Radius【V2.3.1】库新沉淀的圆角裁剪附加属性：DataGrid 表头/行底
+                     自带方角背景会盖住卡片圆弧（Border.CornerRadius 不裁子元素），挂 12px 裁剪
+                     （=卡片 18 − 网格内边距 6，同心圆弧）让表格四角跟随卡片圆角 -->
+                <DataGrid x:Name="表格" ItemsSource="{Binding 表格行}" Margin="6,6,6,6"
+                          ui:KxRoundedClip.Radius="12">
                     <DataGrid.Columns>
                         <!-- 时段列固定宽度，其余 9 列用 * 均分剩余空间：窗口再窄也一屏显示完，不出横向滚动条 -->
                         <DataGridTextColumn Header="时段" Binding="{Binding Period}" Width="92" ElementStyle="{StaticResource TableCellText}" />
@@ -255,6 +273,52 @@
                         <DataGridTextColumn Header="稼动率%" Binding="{Binding Utilization}" Width="*" ElementStyle="{StaticResource TableCellText}" />
                     </DataGrid.Columns>
                 </DataGrid>
+            </Border>
+
+            <!-- ==================== 历史查询面板【V2.3.1】 ==================== -->
+            <!-- 选中第 7 个页签（历史查询）时显示：按日期区间 + 单元筛选从 SQLite 库取数，可导出 CSV。
+                 控件全复用库样式（KxCard / KxDatePicker / KxComboBox / KxPrimaryButton / KxSecondaryButton）零自绘；
+                 显示切换在 切换历史视图，查询/导出在 查询按钮_Click / 查询导出按钮_Click，列头随语言在 应用语言()。 -->
+            <Border x:Name="查询面板" Grid.Column="0" Style="{StaticResource KxCard}" Margin="20,12,12,16"
+                    Padding="14" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="查询从标签" Text="从" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <DatePicker x:Name="查询起始" Style="{StaticResource KxDatePicker}" Width="130" Margin="0,0,12,0" />
+                        <TextBlock x:Name="查询至标签" Text="至" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <DatePicker x:Name="查询截止" Style="{StaticResource KxDatePicker}" Width="130" Margin="0,0,12,0" />
+                        <TextBlock x:Name="查询单元标签" Text="单元" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <ComboBox x:Name="查询单元" Style="{StaticResource KxComboBox}" Width="110" Margin="0,0,16,0" SelectedIndex="0" />
+                        <Button x:Name="查询按钮" Style="{StaticResource KxPrimaryButton}" Content="查询"
+                                Click="查询按钮_Click" Padding="16,7" Margin="0,0,10,0" />
+                        <Button x:Name="查询导出按钮" Style="{StaticResource KxSecondaryButton}" Content="导出 CSV"
+                                Click="查询导出按钮_Click" Padding="14,7" />
+                        <TextBlock x:Name="查询结果数" Style="{StaticResource CaptionText}" Text="0 行"
+                                   VerticalAlignment="Center" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <!-- 同主表格：KxRoundedClip 让查询结果表四角跟随卡片圆角【V2.3.1】 -->
+                    <DataGrid x:Name="查询表格" Grid.Row="1" Margin="6,10,6,6" ItemsSource="{Binding 查询行}"
+                              ui:KxRoundedClip.Radius="12">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn x:Name="查询列日期" Header="日期" Binding="{Binding 日期}" Width="90" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列班次" Header="班次" Binding="{Binding 班次}" Width="62" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列时段" Header="时段" Binding="{Binding 时段}" Width="92" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列产能" Header="小时产能(PCS)" Binding="{Binding Total}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列OK" Header="OK产能(PCS)" Binding="{Binding Ok}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列NG" Header="NG产能(PCS)" Binding="{Binding Ng}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列良率" Header="良率%" Binding="{Binding Yield}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列生产" Header="生产时间(Min)" Binding="{Binding Production}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列待料" Header="待料时间(Min)" Binding="{Binding Wait}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列报警" Header="报警时间(Min)" Binding="{Binding Alarm}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列停止" Header="停止时间(Min)" Binding="{Binding Stop}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                            <DataGridTextColumn x:Name="查询列稼动率" Header="稼动率%" Binding="{Binding Utilization}" Width="*" ElementStyle="{StaticResource TableCellText}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
             </Border>
 
             <!-- 右侧栏（外面套 ScrollViewer：窗口被缩小时内容可滚动，不会被裁掉，
@@ -383,8 +447,12 @@
         </Grid>
 
         <!-- ==================== 底部状态条 ==================== -->
+        <!-- CornerRadius【V2.3.1】状态条四角全圆（库令牌 Fn.ShellRadius=10）：它与表格卡片之间
+             本就有 16px 空隙、四周贴着 12px 留白，是个悬浮块，四角全圆与 KPI 卡片观感一致；
+             最大化归零/还原挂回令牌见 窗口_StateChanged。 -->
         <Border x:Name="状态条区" Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
-                BorderThickness="0,1,0,0" Padding="20,10">
+                BorderThickness="0,1,0,0" Padding="20,10"
+                CornerRadius="{DynamicResource Fn.ShellRadius}">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse x:Name="状态灯" Style="{StaticResource KxStatusDot}" Tag="Warn"

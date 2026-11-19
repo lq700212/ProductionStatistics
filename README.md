@@ -2,16 +2,17 @@
 
 # 生产统计（点胶固化收料机）
 
-**运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → CSV 落盘 → Excel 导出，一条龙。**
+**运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → SQLite 数据库落库 → Excel/CSV 导出，一条龙。**
 
-![version](https://img.shields.io/badge/version-v0.0.4-2C7BE5)
+![version](https://img.shields.io/badge/version-v0.0.5-2C7BE5)
 ![framework](https://img.shields.io/badge/.NET_Framework-4.7.2-5C2D91?logo=dotnet)
 ![platform](https://img.shields.io/badge/platform-Windows_10_11-0078D6?logo=windows11)
 ![plc](https://img.shields.io/badge/PLC-三菱_FX5U_MC协议-FF6A00)
 ![comm-lib](https://img.shields.io/badge/通讯·UI库-kaleidoscope-2EA043)
 
 焊接 / 气密 / 贴标三单元产量与四类时间（生产·待料·报警·停止）实时看板：
-当天·昨天·前天 × 白班·夜班 6 页签回看，中英双语、深浅主题、按天滚动日志、
+当天·昨天·前天 × 白班·夜班 6 页签回看 + 历史查询页（按日期区间/单元筛选、导出 CSV），
+数据主存储 SQLite 单文件库（旧版 CSV 首启自动导入），中英双语、深浅主题、按天滚动日志、
 自诊断"时间账目/分钟产量"日志让现场排障一眼定位。
 
 </div>
@@ -25,7 +26,7 @@
 | | |
 | --- | --- |
 | ![当天白班](docs/images/01-main-today-day.png) | ![英文界面](docs/images/04-main-english.png) |
-| 主界面：6 页签看板 + KPI + 单元状态 + 设备状态条 | 中英一键切换（表格/按钮/状态全跟随） |
+| 主界面：7 页签看板（6 班次 + 历史查询）+ KPI + 单元状态 + 设备状态条 | 中英一键切换（表格/按钮/状态全跟随） |
 | ![深色主题](docs/images/05-main-dark.png) | ![报警状态](docs/images/06-main-alarm.png) |
 | 深色主题（右上角开关即时切换并写回 ini） | 报警状态：提示卡与状态条变红，报警时间进统计 |
 | ![待料状态](docs/images/07-main-idle.png) | ![离线状态](docs/images/08-main-offline.png) |
@@ -44,11 +45,13 @@ dotnet build ProductionStatistics\ProductionStatistics.csproj -c Debug
 # 产物：ProductionStatistics\bin\Debug\net472\ProductionStatistics.Wpf.exe
 
 # ③ 部署运行目录（exe 同目录）
-#    HslCommunication.dll / EPPlus.dll / Kaleidoscope.dll / Kaleidoscope.UI.dll（构建自动带出）
+#    HslCommunication.dll / EPPlus.dll / System.Data.SQLite.dll + x64\x86 的 SQLite.Interop.dll
+#    / Kaleidoscope.dll / Kaleidoscope.UI.dll（构建自动带出，SQLite 原生互操作按位数子目录探测）
 #  + hsl.dat（HSL 商业授权，缺它 PLC 会间歇性"系统授权失败"→ 漏计，见"配置与授权"）
 #  + 生产统计.ini（首次运行自动生成缺省配置）
+#    注：数据主存储 数据\生产统计.db 首次运行自动建库，发现旧版 CSV 会自动导入
 
-# ④ 端到端自动化回归（计数逻辑改动后必跑，7 组用例 12 断言）
+# ④ 端到端自动化回归（计数/存储逻辑改动后必跑，8 组用例）
 powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
 
 # ⑤ 主题键契约静态检查（改主题键/库样式/主窗控件键后必跑）
@@ -65,10 +68,13 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.p
   单轮采样周期实测 109ms（老 4 次报文 200~330ms），漏采窗口减半；
 - **班次看板**：白班 08:00–20:00 / 夜班 20:00–次日 08:00 固定口径，12 小时行 + 合计行，
   KPI（总产能/OK/NG/良率/稼动率/生产时间）+ 稼动率圆环 + 三单元实时状态；
-- **6 页签回看**：当天/昨天/前天 × 白/夜班，跨天自动刷新页签；
-- **CSV 落盘与续算**：`数据\生产履历_日期.csv`（25 行 × 14 列，UTF-8 BOM）每 30 秒整文件覆盖，
-  启动载入最近三天续算，重启不断账；
+- **6+1 页签**：当天/昨天/前天 × 白/夜班 6 页签跨天自动刷新；第 7 页"历史查询"按日期区间 +
+  单元筛选从库取数、结果导出 CSV；
+- **SQLite 数据库主存储**：`数据\生产统计.db` 单文件（WAL 模式断电自恢复），每 30 秒 UPSERT
+  落库（最坏丢 30 秒，与旧 CSV 同级可靠），启动载入最近三天续算，重启不断账；库为空时
+  自动一次性导入旧版 CSV（升级零手工迁移），此后 CSV 只作历史查询导出格式；
 - **Excel 导出**：EPPlus 输出 27 行 × 10 列完整履历（标题/表头/两班 12 小时行+合计）；
+  历史查询结果另支持 CSV 导出（UTF-8 BOM）；
 - **中英双语 + 深浅主题**：语言运行中一键切换（CSV/Excel 固定中文格式），主题切换写回 ini；
   颜色/阴影全部走库 `Brush.Shell.*` 语义键 + 动态资源，主题开关/胶囊/状态灯用 `Tag` 语义着色，
   两本主题键集由 `Run-ThemeContractTests.ps1` 静态校验（各 133 键、键集一致）；
@@ -97,9 +103,9 @@ graph LR
 
     subgraph APP[ProductionStatistics.Wpf]
         COL[PlcCollector 采集线程<br/>合并读 11 位 / 上升沿计数 / 时间记账]
-        STORE[StatisticsStore<br/>内存统计 + 30 秒落盘]
+        STORE[StatisticsStore + StatisticsDbStore<br/>内存统计 + 30 秒 SQLite 落库]
         EXP[ExcelExporter<br/>EPPlus]
-        MAIN[MainWindow<br/>1 秒 DispatcherTimer]
+        MAIN[MainWindow<br/>1 秒 DispatcherTimer<br/>7 页签（6 班次 + 历史查询）]
     end
 
     PLC -->|合并读 11 位| COL
@@ -110,8 +116,9 @@ graph LR
     INI -.->|语言 / 主题 / 设备名| MAIN
 
     COL -->|计数 + 四类时间| STORE
-    STORE -->|30 秒整文件覆盖| CSV[(数据/生产履历_日期.csv)]
+    STORE -->|30 秒 UPSERT（WAL）| DB[(数据/生产统计.db<br/>SQLite 主存储)]
     STORE -->|1 秒定时器拉取| MAIN
+    MAIN -.->|历史查询 / CSV 导出| DB
     MAIN -->|点导出按钮| EXP
     STORE -.->|当天记录| EXP
     EXP --> XLSX[(xlsx 履历)]
@@ -134,19 +141,20 @@ graph LR
 ```text
 ProductionStatistics/                    # 仓库根
 ├── ProductionStatistics/                # 主工程（WPF，.NET Framework 4.7.2）
-│   ├── MainWindow.xaml(.cs)             # 主窗体：6 页签看板 / KPI / 自绘窗口
+│   ├── MainWindow.xaml(.cs)             # 主窗体：7 页签看板（6 班次 + 历史查询）/ KPI / 自绘窗口
 │   ├── App.xaml(.cs)                    # 入口：日志初始化 / 全局异常兜底 / 主题切换
-│   ├── Services/                        # PlcCollector 采集 / StatisticsStore 落盘 / AppConfig / ExcelExporter
-│   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / Log
-│   ├── ViewModels/ Controls/ Themes/    # 表格行模型 / 样式 / 两套主题色板
+│   ├── Services/                        # PlcCollector 采集 / StatisticsStore+StatisticsDbStore 落库 / AppConfig / ExcelExporter
+│   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / ShiftStore CSV 存取 / Log
+│   ├── ViewModels/ Controls/ Themes/    # 表格行·查询行模型 / 样式 / 两套主题色板
 │   └── Resources/                       # exe 图标
-├── libs/                                # 第三方二进制依赖（HslCommunication / EPPlus，必须入库）
+├── libs/                                # 第三方二进制依赖（HslCommunication / EPPlus / System.Data.SQLite + x64\x86 原生互操作，必须入库）
 ├── extern/kaleidoscope/                 # ★ 公司通讯/UI 通用库（git submodule，源码级依赖）
 │   ├── Kaleidoscope/                    #   设备通讯库（HslAuthorization 授权 / HslPlcClient 多品牌 PLC / 日志桥）
 │   └── Kaleidoscope.UI/                 #   WPF 复用控件库（键板 / Fresh·Kx 控件族 / 圆角窗基类）
 ├── docs/                                # 三份培训文档（操作员/客户技术/内部版）+ 截图
 ├── tools/
-│   ├── E2ETests/                        # ★ 端到端回归 7 组用例 + 主题键契约静态检查
+│   ├── E2ETests/                        # ★ 端到端回归 8 组用例（含 T8 落库断言）+ 主题键契约静态检查
+│   │                                    #   另有 DocShot/shot_window.ps1 轻量窗口截图取证
 │   └── DocShot/                         # 文档截图 harness（FakePlc 假 PLC / 核验 / PDF 转换）
 ├── AGENTS.md                            # AI 协作规范（改代码前必读）
 ├── CHANGELOG.md                         # 版本改动记录
@@ -191,17 +199,22 @@ ProductionStatistics/                    # 仓库根
 ## 部署与交付
 
 1. 拷贝构建产物：`ProductionStatistics.Wpf.exe` + 同目录全部 DLL
-   （`HslCommunication` / `EPPlus` / `Kaleidoscope` / `Kaleidoscope.UI` 等，构建输出自动带出）；
+   （`HslCommunication` / `EPPlus` / `System.Data.SQLite` + `x64\`·`x86\` 子目录里的
+   `SQLite.Interop.dll`【V2.3.1 必须，缺了启动报"找不到 SQLite.Interop.dll"】 /
+   `Kaleidoscope` / `Kaleidoscope.UI` 等，构建输出自动带出）；
 2. **拷贝 `hsl.dat`**（授权机密，缺它通讯间歇性失败漏计）；
 3. 首次运行自动生成 `生产统计.ini` 缺省配置 → 按 PLC 实际改 IP/端口与信号地址；
+   同时自动建库 `数据\生产统计.db`（发现旧版按天 CSV 自动导入，无需手工迁移）；
 4. 开机自启（可选）：把 exe 快捷方式放启动文件夹；硬件未就绪时软件显示"离线重试中"并自动补连。
 
 ## 注意事项
 
 - PLC 离线时程序不崩：界面红字提示、每 60 秒日志留痕、恢复后自动续采；
   但**断线时段的触发脉冲无法补采**（PLC 侧自锁位保持 ON，恢复后按"残留基准"处理不补计）——
-  长时间离线建议现场核对 PLC 侧实际件数后人工修正 CSV。
+  长时间离线建议现场核对 PLC 侧实际件数后用历史查询导出人工核对修正。
 - 触发位必须是"置位保持型"自锁位（软件读到 ON 会写回 false）；脉冲宽度 < 采样周期的
   置位型信号会触发"脉冲过窄"告警，先调小 `轮询间隔Ms`。
-- 双开软件会互相覆盖 CSV（无单实例保护），现场禁止双开。
+- 双开软件会互相争抢 SQLite 库与旧 CSV（无单实例保护），现场禁止双开。
+- 数据库文件（`数据\生产统计.db` + 同名 `-wal`/`-shm`）与日志同在 exe 目录"数据/logs"下，
+  备份现场数据时**连 `-wal` 文件一起拷**（或在软件关闭后只拷主库文件）。
 - 图示界面为演示机 Mock 数据；涉及授权码、客户真实生产数据的截图在对外交付文档中一律打码。

@@ -64,12 +64,13 @@ namespace ProductionStatistics
     }
 
     /// <summary>
-    /// 统计数据的按日 CSV 存取工具（接口少而直白：Save / Load / CsvPath）。
-    /// 做什么：把 DayRecord 写成"数据\生产履历_yyyy-MM-dd.csv"，或从该文件读回来续算。
+    /// 统计数据的按日 CSV 存取工具（【V2.3.1】起 CSV 不再是主存储）。
+    /// 现在的职责只剩两件事：
+    ///   ① Load：旧版升级时把历史 CSV 一次性导入 SQLite 库（见 StatisticsDbStore.导入历史Csv）；
+    ///   ② DataDir/CsvPath：数据目录与文件命名口径（历史查询页的 CSV 导出沿用"数据"目录）。
+    /// 主存储是 数据\生产统计.db（SQLite），CSV 的实时写入已移除（历史查询导出走 CSV 文本生成）。
     /// 文件格式（UTF-8 带 BOM，Excel 双击打开不乱码）：表头 1 行 + 白班 12 行 + 夜班 12 行，固定行序，
     ///   解析时严格按行序对应班次/小时，不靠文字匹配，避免现场手改文件文字后错位。
-    /// 为什么程序退出/重启也不丢数：CSV 每 30 秒落一次盘，重启启动时把今天/昨天/前天三个文件读回内存，
-    ///   之后的计数在已有值上继续累加（时间累计同理），跨重启无缝续算。
     /// 注意：读写数字一律用 InvariantCulture（小数点固定"."）——Windows 区域语言若设成小数逗号的国家，
     ///   按 CurrentCulture 会把"60.0"读错/写成"60,0"，而逗号正是 CSV 分隔符，会把整份文件搞乱（V2.0.0 修复）。
     /// </summary>
@@ -115,43 +116,8 @@ namespace ProductionStatistics
             return titles;
         }
 
-        /// <summary>
-        /// 把一天的记录整体写成 CSV（整文件覆盖写，避免增量写造成半行脏数据）。
-        /// 调用方负责先 lock，保证写入期间 HourStat 不被采集线程修改（本工程在 Form1.SaveAll 锁内调用）。
-        /// </summary>
-        public static void Save(DayRecord rec)
-        {
-            Directory.CreateDirectory(DataDir);
-            var lines = new List<string>();
-            lines.Add(string.Join(",", 列标题));
-            string[] dayTitles = ShiftTitles(true);
-            string[] nightTitles = ShiftTitles(false);
-            for (int i = 0; i < RowsPerShift; i++)
-                lines.Add(RowText("白班 " + dayTitles[i], rec.DayShift[i]));
-            for (int i = 0; i < RowsPerShift; i++)
-                lines.Add(RowText("夜班 " + nightTitles[i], rec.NightShift[i]));
-            File.WriteAllLines(CsvPath(rec.Date), lines, new UTF8Encoding(true));
-        }
-
-        /// <summary>一行统计 → CSV 文字（时间从秒换算成分钟，保留 1 位小数，与 HMI 显示口径一致；InvariantCulture 固定小数点）</summary>
-        private static string RowText(string 时段, HourStat s)
-        {
-            return string.Join(",",
-                时段,
-                s.TotalCount,
-                s.OkCount,
-                s.NgCount,
-                s.UnitOk[0], s.UnitNg[0],
-                s.UnitOk[1], s.UnitNg[1],
-                s.UnitOk[2], s.UnitNg[2],
-                (s.ProductionSec / 60.0).ToString("F1", CultureInfo.InvariantCulture),
-                (s.WaitSec / 60.0).ToString("F1", CultureInfo.InvariantCulture),
-                (s.AlarmSec / 60.0).ToString("F1", CultureInfo.InvariantCulture),
-                (s.StopSec / 60.0).ToString("F1", CultureInfo.InvariantCulture));
-        }
-
-        /// <summary>
-        /// 读某天的 CSV；文件不存在返回 null（正常情况，比如刚装的机器），内容坏行直接跳过。
+    /// <summary>
+    /// 读某天的 CSV；文件不存在返回 null（正常情况，比如刚装的机器），内容坏行直接跳过。
         /// 严格按行序还原：第 1~12 行白班、第 13~24 行夜班（不含表头）。
         /// </summary>
         public static DayRecord Load(DateTime date)

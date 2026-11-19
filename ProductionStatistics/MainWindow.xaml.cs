@@ -21,15 +21,16 @@ namespace ProductionStatistics
     /// 做什么（与 WinForms 版一一对应，界面换皮、逻辑不变）：
     ///   顶栏：设备名 / PLC 连接状态 / 时钟 / 主题开关(深浅) / 中英切换 / 导出 Excel
     ///   页签：当天·昨天·前天 × 白班·夜班 共 6 页（两行文字：班次名 + 日期，跨天自动更新）
+    ///        + 第 7 页"历史查询"（按日期区间+单元从数据库查询、导出 CSV）【V2.3.1】
     ///   KPI：当前页签的总产能 / OK / NG / 良率 / 稼动率 / 生产时间
     ///   主表：12 个小时行 + 班次合计行，列与现场 HMI 一致
     ///   右侧：设备状态（自动中/报警/稼动率环）+ 三单元 OK/NG/IDLE + 提示
     ///   底栏：设备运行/暂停/报警/离线四态 + 采样与落盘信息
     ///
     /// 运行流程：
-    ///   构造 → 建集合 → 载入 ini 与历史 CSV → 启动 PlcCollector（后台轮询 PLC）
+    ///   构造 → 建集合 → 载入 ini 与 SQLite 历史（库空时自动导入旧 CSV）→ 启动 PlcCollector（后台轮询 PLC）
     ///         → 启动 1 秒 DispatcherTimer：消费脏标志刷新表格/KPI/单元状态
-    ///   关闭 → 停采集 → 最后落一次盘
+    ///   关闭 → 停采集 → 最后落库 → 关库
     ///
     /// 线程纪律：采集线程只写内存 + 置脏标志，**不碰界面**；界面全部由 1 秒定时器在 UI 线程刷新。
     ///
@@ -40,7 +41,7 @@ namespace ProductionStatistics
     public partial class MainWindow : ChromeBorderlessWindow
     {
         // ===================== 统计数据与采集 =====================
-        /// <summary>统计仓库（内存统计 + CSV 落盘）</summary>
+        /// <summary>统计仓库（内存统计 + SQLite 落库【V2.3.1】）</summary>
         private StatisticsStore 统计 = new StatisticsStore();
 
         /// <summary>PLC 采集服务（后台线程）</summary>
@@ -53,8 +54,11 @@ namespace ProductionStatistics
         /// <summary>表格 13 行（12 小时 + 合计）</summary>
         public ObservableCollection<HourRow> 表格行 { get; private set; }
 
-        /// <summary>6 个班次页签</summary>
+        /// <summary>6 个班次页签 + 第 7 个"历史查询"工具页签【V2.3.1】</summary>
         public ObservableCollection<TabView> 页签列表 { get; private set; }
+
+        /// <summary>历史查询结果行集合【V2.3.1】：查询按钮按需重建内容（Clear+Add），绑定不换实例</summary>
+        public ObservableCollection<QueryRow> 查询行 { get; private set; }
 
         /// <summary>6 张 KPI 卡片</summary>
         public ObservableCollection<KpiItem> KPI列表 { get; private set; }
@@ -101,7 +105,12 @@ namespace ProductionStatistics
             表格行 = new ObservableCollection<HourRow>();
             for (int i = 0; i < 13; i++) 表格行.Add(new HourRow());
             页签列表 = new ObservableCollection<TabView>();
-            for (int i = 0; i < 6; i++) 页签列表.Add(new TabView());
+            // 7 个页签 = 6 个班次页签（今天/昨天/前天 × 白/夜）+ 第 7 个"历史查询"工具页签【V2.3.1】
+            for (int i = 0; i < 7; i++) 页签列表.Add(new TabView());
+            查询行 = new ObservableCollection<QueryRow>();
+            // 历史查询面板默认查"今天"（起止都选今天，切进页签时 切换历史视图 会自动执行一次查询）
+            查询起始.SelectedDate = DateTime.Today;
+            查询截止.SelectedDate = DateTime.Today;
 
             // ② 读配置（ini 已在 App 启动时读过一遍，这里直接取值）+ 载入历史 CSV 续算
             英文界面 = AppConfig.是英文界面;
@@ -137,7 +146,8 @@ namespace ProductionStatistics
             刷新定时器.Tick += 刷新定时器_Tick;
             刷新定时器.Start();
 
-            Log.Info("主窗体初始化完成: 页签=6 | 数据目录=" + ShiftStore.DataDir + " | 日志目录=" + Log.LogDir);
+            Log.Info("主窗体初始化完成: 页签=7(含历史查询) | 数据库=" + StatisticsDbStore.DbPath
+                + " | 数据目录=" + ShiftStore.DataDir + " | 日志目录=" + Log.LogDir);
         }
 
         /// <summary>1 秒刷新定时器：刷时钟 → 跨天刷页签日期 → 脏标志成立才刷表格/KPI/单元状态 → 刷状态条</summary>
@@ -162,12 +172,20 @@ namespace ProductionStatistics
             刷新连接状态(采集 != null && 采集.IsPlcOnline);
         }
 
-        /// <summary>刷新 6 个页签的文字（两行：班次名 + 日期）与选中态</summary>
+        /// <summary>刷新 7 个页签的文字（6 个班次页签：班次名+日期；第 7 个=历史查询）与选中态</summary>
         private void 刷新页签文字()
         {
             上次页签日期 = DateTime.Today;
             for (int i = 0; i < 页签列表.Count; i++)
             {
+                页签列表[i].序号 = i;
+                if (i == 6)   // 第 7 个：历史查询工具页签，不属于任何班次【V2.3.1】
+                {
+                    页签列表[i].名称 = 英文界面 ? "History Query" : "历史查询";
+                    页签列表[i].日期 = 英文界面 ? "Query & CSV" : "查询 · 导出";
+                    页签列表[i].IsSelected = (i == 选中页签);
+                    continue;
+                }
                 DateTime 日期 = DateTime.Today.AddDays(-(i / 2));
                 bool 是白班 = (i % 2) == 0;
                 页签列表[i].序号 = i;
@@ -188,6 +206,8 @@ namespace ProductionStatistics
         /// <summary>刷新表格：12 个小时行 + 班次合计行（锁内取数，出锁后逐行更新属性）</summary>
         private void 刷新表格()
         {
+            // 历史查询页签下主表格是隐藏的，不必刷（查询面板有自己的数据）【V2.3.1】
+            if (选中页签 == 6) return;
             DateTime date = DateTime.Today.AddDays(-(选中页签 / 2));
             bool 是白班 = (选中页签 % 2) == 0;
             string[] titles = ShiftStore.ShiftTitles(是白班);
@@ -220,6 +240,8 @@ namespace ProductionStatistics
         /// <summary>刷新 6 张 KPI 卡片（当前页签的合计口径）</summary>
         private void 刷新KPI()
         {
+            // 历史查询页签下 KPI 区是隐藏的，不必刷【V2.3.1】
+            if (选中页签 == 6) return;
             DateTime date = DateTime.Today.AddDays(-(选中页签 / 2));
             bool 是白班 = (选中页签 % 2) == 0;
             double 产能 = 0, ok = 0, ng = 0, 生产 = 0, 待料 = 0, 报警 = 0, 停止 = 0;
@@ -389,10 +411,10 @@ namespace ProductionStatistics
             设置文字语义(报警文字, 采集.latestAlarm ? "Ng" : "Ok",
                 采集.latestAlarm ? (英文界面 ? "● Alarm" : "● 报警") : (英文界面 ? "Normal" : "正常"));
 
-            // 底栏右侧信息（落盘时间每 30 秒变一次，这里显示上次记录的）
+            // 底栏右侧信息（落库时间每 30 秒变一次，这里显示上次记录的）【V2.3.1】落盘改落库
             上次落盘显示 = 统计.lastSaveTime;
             底栏信息.Text = (英文界面 ? "Sample " : "采样 ") + AppConfig.取整数("PLC", "轮询间隔Ms", 100) + "ms · "
-                + (英文界面 ? "Last save " : "最近落盘 ")
+                + (英文界面 ? "Last saved " : "最近落库 ")
                 + (上次落盘显示 == DateTime.MinValue ? "--" : 上次落盘显示.ToString("HH:mm:ss"))
                 + (英文界面 ? " · log: logs\\运行日志_日期.log" : " · 日志 logs\\运行日志_日期.log");
         }
@@ -409,7 +431,7 @@ namespace ProductionStatistics
                 : (英文界面 ? "PLC connection failed" : "PLC 连接失败");
         }
 
-        /// <summary>页签点击：切换选中页并立即刷新表格</summary>
+        /// <summary>页签点击：班次页签刷表格/KPI；历史查询页签换查询面板【V2.3.1】</summary>
         private void 页签按钮_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as ToggleButton;
@@ -417,9 +439,33 @@ namespace ProductionStatistics
             int 序号 = (int)btn.Tag;
             选中页签 = 序号;
             for (int i = 0; i < 页签列表.Count; i++) 页签列表[i].IsSelected = (i == 选中页签);
-            刷新表格();
-            刷新KPI();
+            // 第 7 个页签=历史查询：KPI 区/主表格换成查询面板；其余页签恢复班次视图
+            切换历史视图(序号 == 6);
+            if (序号 != 6)
+            {
+                刷新表格();
+                刷新KPI();
+            }
             刷新提示();
+        }
+
+        /// <summary>
+        /// 班次视图 ⇄ 历史查询视图切换【V2.3.1】：只换主区可见性（顶栏/页签栏/右侧栏/状态条共用不动）。
+        /// 进历史查询时默认查今天并立即执行，让用户一进来就有数；顶栏"导出 Excel"按班次日期导整天、
+        /// 历史页没有"当前班次"概念，禁用避免歧义（导出走查询面板的"导出 CSV"按钮）。
+        /// </summary>
+        private void 切换历史视图(bool 历史态)
+        {
+            KPI区.Visibility = 历史态 ? Visibility.Collapsed : Visibility.Visible;
+            表格卡片.Visibility = 历史态 ? Visibility.Collapsed : Visibility.Visible;
+            查询面板.Visibility = 历史态 ? Visibility.Visible : Visibility.Collapsed;
+            导出按钮.IsEnabled = !历史态;
+            if (历史态)
+            {
+                查询起始.SelectedDate = DateTime.Today;
+                查询截止.SelectedDate = DateTime.Today;
+                执行查询();
+            }
         }
 
         /// <summary>主题开关：深色 ⇄ 浅色（即时生效，并写回 ini 供下次启动沿用）</summary>
@@ -497,6 +543,26 @@ namespace ProductionStatistics
             for (int i = 0; i < 单元列表.Count; i++)
                 单元列表[i].名称 = 英文 ? PlcCollector.单元名称En[i] : PlcCollector.单元名称[i];
 
+            // 历史查询面板【V2.3.1】：标签/按钮/列头全量切语言；单元下拉换文字但保持选中项
+            查询从标签.Text = 英文 ? "From" : "从";
+            查询至标签.Text = 英文 ? "To" : "至";
+            查询单元标签.Text = 英文 ? "Unit" : "单元";
+            int 查询单元选中 = 查询单元.SelectedIndex;
+            查询单元.ItemsSource = 英文
+                ? new[] { "All Units", PlcCollector.单元名称En[0], PlcCollector.单元名称En[1], PlcCollector.单元名称En[2] }
+                : new[] { "全部单元", PlcCollector.单元名称[0], PlcCollector.单元名称[1], PlcCollector.单元名称[2] };
+            查询单元.SelectedIndex = 查询单元选中 < 0 ? 0 : 查询单元选中;
+            查询按钮.Content = 英文 ? "Query" : "查询";
+            查询导出按钮.Content = 英文 ? "Export CSV" : "导出 CSV";
+            导出按钮.ToolTip = 英文 ? "Export current shift day to Excel" : "导出当前页签所属日期的 Excel";
+            string[] 查询列头 = 英文
+                ? new[] { "Date", "Shift", "Period", "Output\n(PCS)", "OK Qty\n(PCS)", "NG Qty\n(PCS)", "Yield%",
+                          "Prod. Time\n(Min)", "Idle Time\n(Min)", "Alarm Time\n(Min)", "Stop Time\n(Min)", "Utilization%" }
+                : new[] { "日期", "班次", "时段", "小时产能\n(PCS)", "OK产能\n(PCS)", "NG产能\n(PCS)", "良率%",
+                          "生产时间\n(Min)", "待料时间\n(Min)", "报警时间\n(Min)", "停止时间\n(Min)", "稼动率%" };
+            for (int i = 0; i < 查询表格.Columns.Count && i < 查询列头.Length; i++)
+                查询表格.Columns[i].Header = 查询列头[i];
+
             刷新页签文字();
             刷新表格();
             刷新KPI();
@@ -504,6 +570,8 @@ namespace ProductionStatistics
             刷新连接状态(采集 != null && 采集.IsPlcOnline);
             刷新状态条();
             刷新提示();
+            // 历史查询结果里的"班次"等文字随语言变：结果快照按新语言重跑一次当前查询【V2.3.1】
+            if (选中页签 == 6) 执行查询();
             语言切换中 = 原标志;
         }
 
@@ -539,6 +607,125 @@ namespace ProductionStatistics
             catch (Exception ex)
             {
                 Log.Error("导出 Excel 失败", ex);
+                MessageBox.Show(this, (英文界面 ? "Export failed: " : "导出失败：") + ex.Message,
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ===================== 历史查询（第 7 页签）【V2.3.1】 =====================
+
+        /// <summary>查询按钮：按面板里的日期区间 + 单元筛选取数（内存优先、库里补齐）</summary>
+        private void 查询按钮_Click(object sender, RoutedEventArgs e)
+        {
+            执行查询();
+        }
+
+        /// <summary>
+        /// 执行历史查询：日期区间 [起,止]（起>止自动纠正、最长 366 天防手滑拖死整库）× 单元筛选。
+        /// 取数顺序：内存里有的日期直接用（今天/昨天/前天实时最新），缺的日期出锁后查 SQLite 补齐——
+        /// 锁内绝不碰库（文件 IO），符合"锁内禁止网络/慢 IO"的线程纪律。
+        /// 空行（计数与四类时间全 0）不显示，避免历史日期一大片 0 没法看。
+        /// </summary>
+        private void 执行查询()
+        {
+            DateTime 起 = 查询起始.SelectedDate ?? DateTime.Today;
+            DateTime 止 = 查询截止.SelectedDate ?? DateTime.Today;
+            if (起 > 止) { DateTime t = 起; 起 = 止; 止 = t; }
+            if ((止 - 起).TotalDays > 366) 止 = 起.AddDays(366);
+            int 单元 = 查询单元.SelectedIndex - 1;   // 0=全部单元→-1（三单元合计），1/2/3=焊接/气密/贴标
+
+            var rows = new List<QueryRow>();
+            var 缺日期 = new List<DateTime>();
+            lock (统计.锁)
+            {
+                for (DateTime d = 起; d <= 止; d = d.AddDays(1))
+                {
+                    DayRecord rec;
+                    if (统计.dayRecords.TryGetValue(d, out rec))
+                        追加查询行(rows, d, rec, 单元);
+                    else
+                        缺日期.Add(d);
+                }
+            }
+            // 出锁再读库（连接内部 _库锁 串行化），不占 统计.锁
+            foreach (DateTime d in 缺日期)
+            {
+                DayRecord rec = 统计.库.读取天(d);
+                if (rec != null) 追加查询行(rows, d, rec, 单元);
+            }
+
+            查询行.Clear();
+            for (int i = 0; i < rows.Count; i++) 查询行.Add(rows[i]);
+            查询结果数.Text = 英文界面 ? rows.Count + " rows" : rows.Count + " 行";
+        }
+
+        /// <summary>把一天的记录按单元筛选转成查询行（白班+夜班各 12 个小时桶，空行跳过）</summary>
+        private void 追加查询行(List<QueryRow> rows, DateTime d, DayRecord rec, int 单元)
+        {
+            追加班查询行(rows, d, true, rec.DayShift, 单元);
+            追加班查询行(rows, d, false, rec.NightShift, 单元);
+        }
+
+        /// <summary>追加一个班次的小时行（追加查询行内部小工具）</summary>
+        private void 追加班查询行(List<QueryRow> rows, DateTime d, bool 白班, HourStat[] stats, int 单元)
+        {
+            string[] titles = ShiftStore.ShiftTitles(白班);
+            string 班次文字 = 英文界面 ? (白班 ? "Day" : "Night") : (白班 ? "白班" : "夜班");
+            for (int i = 0; i < stats.Length; i++)
+            {
+                HourStat s = stats[i];
+                bool 有数据 = s.TotalCount > 0 || s.ProductionSec > 0 || s.WaitSec > 0
+                    || s.AlarmSec > 0 || s.StopSec > 0;
+                if (!有数据) continue;
+                var row = new QueryRow();
+                row.设置(d, 班次文字, titles[i], s, 单元);
+                rows.Add(row);
+            }
+        }
+
+        /// <summary>导出 CSV：把当前查询结果存成 UTF-8(BOM) 文件，列头与查询表格显示一致（随语言）</summary>
+        private void 查询导出按钮_Click(object sender, RoutedEventArgs e)
+        {
+            if (查询行.Count == 0)
+            {
+                MessageBox.Show(this, 英文界面 ? "No rows. Click Query first." : "暂无查询结果，请先点\"查询\"。",
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var dlg = new SaveFileDialog
+            {
+                Filter = "CSV 文件 (*.csv)|*.csv",
+                FileName = "生产履历查询_"
+                    + (查询起始.SelectedDate ?? DateTime.Today).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    + "_" + (查询截止.SelectedDate ?? DateTime.Today).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".csv"
+            };
+            if (dlg.ShowDialog() != true) return;
+            try
+            {
+                var sb = new StringBuilder();
+                for (int i = 0; i < 查询表格.Columns.Count; i++)
+                {
+                    sb.Append(查询表格.Columns[i].Header.ToString().Replace("\n", ""));
+                    sb.Append(i < 查询表格.Columns.Count - 1 ? "," : "\r\n");
+                }
+                foreach (QueryRow r in 查询行)
+                {
+                    // 数字已经是 InvariantCulture 格式化好的字符串（QueryRow.设置），直接拼不丢精度
+                    sb.Append(r.日期).Append(',').Append(r.班次).Append(',').Append(r.时段).Append(',')
+                      .Append(r.Total).Append(',').Append(r.Ok).Append(',').Append(r.Ng).Append(',')
+                      .Append(r.Yield).Append(',').Append(r.Production).Append(',').Append(r.Wait).Append(',')
+                      .Append(r.Alarm).Append(',').Append(r.Stop).Append(',').Append(r.Utilization)
+                      .Append("\r\n");
+                }
+                // UTF-8 带 BOM：Excel 双击打开不乱码（与旧 CSV 口径一致）
+                File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(true));
+                Log.Info("历史查询导出 CSV: " + dlg.FileName + " (" + 查询行.Count + " 行)");
+                MessageBox.Show(this, (英文界面 ? "Exported:\n" : "导出成功：\n") + dlg.FileName,
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("历史查询导出 CSV 失败", ex);
                 MessageBox.Show(this, (英文界面 ? "Export failed: " : "导出失败：") + ex.Message,
                     英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -682,7 +869,11 @@ namespace ProductionStatistics
 
         /// <summary>
         /// 窗口状态变化：更新最大化图标 + 最大化时去掉根 Border 的 12px 留白/描边。
-        /// 圆角归零与裁剪由基类 ApplyMaximizedCorner 负责；这里只处理基类不管的 Padding/BorderThickness。
+        /// 根 Border 的圆角归零与裁剪由基类 ApplyMaximizedCorner 负责；这里处理基类不管的
+        /// Padding/BorderThickness，以及【V2.3.1】新增的三块内容圆角（顶栏/页签带/状态条，
+        /// 见 XAML 对应节点）：最大化铺满工作区时这三块若仍带 10px 圆角，屏幕四角会露出
+        /// 缺口，必须与根 Border 同步归零；还原时再用 SetResourceReference 挂回库令牌
+        /// （与 XAML 里的 DynamicResource 等价，主题切换仍能跟随）。
         /// </summary>
         private void 窗口_StateChanged(object sender, EventArgs e)
         {
@@ -691,6 +882,19 @@ namespace ProductionStatistics
             {
                 窗口内容.Padding = new Thickness(最大化 ? 0 : 12);
                 窗口内容.BorderThickness = new Thickness(最大化 ? 0 : 1);
+            }
+            // 内容块圆角随最大化归零 / 还原挂回库令牌（口径与根 Border 保持一致）
+            if (最大化)
+            {
+                顶栏区.CornerRadius = new CornerRadius(0);
+                页签区.CornerRadius = new CornerRadius(0);
+                状态条区.CornerRadius = new CornerRadius(0);
+            }
+            else
+            {
+                顶栏区.SetResourceReference(Border.CornerRadiusProperty, "Fn.ShellRadiusTop");
+                页签区.SetResourceReference(Border.CornerRadiusProperty, "Fn.ShellRadiusBottom");
+                状态条区.SetResourceReference(Border.CornerRadiusProperty, "Fn.ShellRadius");
             }
             最大化图标.Data = 最大化
                 ? Geometry.Parse("M5.5,5.5 H12.5 V12.5 H5.5 Z M3.5,10.5 V3.5 H10.5")
@@ -703,7 +907,8 @@ namespace ProductionStatistics
             刷新定时器.Stop();
             if (采集 != null) 采集.停止();
             统计.保存全部();
-            Log.Info("软件退出: 停定时器 → 停采集 → 最后落盘");
+            统计.库.关闭库();   // 【V2.3.1】退出前关 SQLite 连接，让 WAL 落回主库文件
+            Log.Info("软件退出: 停定时器 → 停采集 → 最后落库 → 关库");
             base.OnClosing(e);
         }
 

@@ -22,6 +22,7 @@
 | `check_config.py` | 核验配置的唯一事实源：功能边界、硬件、禁词、必需章节、图片白名单、ini/版本/源码常量自检 |
 | `check_docs.py` | 三份文档 + 截图 + PDF 的全量核验（调用 `check_config.py`） |
 | `md_to_pdf.py` | Markdown → HTML → Edge 无头打印 PDF，带 A4 版式与图注绑定 |
+| `shot_window.ps1` | 【V2.3.1】轻量窗口截图取证（独立于全量流水线）：起真 exe 按窗口状态（还原/最大化）截图 + 四角裁剪放大，UI 细节改动快速视觉验证用；`powershell -ExecutionPolicy Bypass -File tools\DocShot\shot_window.ps1 -Exe <exe> -OutDir <目录> -States Restored,Maximized -Kill` |
 | `build/` | 编译产物：`DocShot.exe`、`FakePlc.exe`、`HslCommunication.dll`（运行时拷贝，编译命令末尾从 `libs\` 复制） |
 
 运行期还会生成 `backup_<时间戳>/`（现场备份）和 `preview/`（PDF 抽检图），

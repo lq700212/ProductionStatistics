@@ -11,6 +11,8 @@
 #   T6 重启无爆发      —— 杀掉软件重启（FakePlc 不动、触发位残留 ON，复现现场
 #                          11-19 "398 件" 事故场景），重启后分钟产量仍 ∈ [20, 40]
 #   T7 无 ERROR        —— 全程日志零 ERROR 行
+#   T8 数据库落库      —— 【V2.3.1】主存储=SQLite：数据\生产统计.db 已建、当天小时行落库、
+#                          脉冲源产量计数进了库（三单元 OK 合计 >0）
 #
 # 用法（项目根执行）：
 #   powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
@@ -82,6 +84,11 @@ if (-not (Test-Path (Join-Path $binDir "ProductionStatistics.Wpf.exe"))) {
 
 # 部署测试运行目录（exe + 全部 DLL + 授权 + 测试 ini）
 Copy-Item (Join-Path $binDir "*") $run -Force -Recurse
+# 【V2.3.1】bin 目录的 logs/ 与 数据/ 会被上面的通配拷贝一并带进来——历史日志污染 T2/T7
+# 断言（旧"未授权"提示行含"系统授权失败"字样），残留 生产统计.db 会让 T8 读到旧数据且
+# 跳过"空库导入"链路。测试必须从全新数据状态起跑，删掉这两处：
+Remove-Item (Join-Path $run "logs") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $run "数据") -Recurse -Force -ErrorAction SilentlyContinue
 $hasLicense = Test-Path $HslDat
 if ($hasLicense) {
     Copy-Item $HslDat (Join-Path $run "hsl.dat") -Force
@@ -233,6 +240,31 @@ try {
     Assert ($errLines.Count -eq 0) "T7 全程零 ERROR" ("ERROR 行 " + $errLines.Count + " 条")
     if ($errLines.Count -gt 0) {
         $errLines | Select-Object -First 5 | ForEach-Object { Write-Output ("    " + $_) }
+    }
+
+    # T8 数据库落库（【V2.3.1】主存储从 CSV 换 SQLite：库文件存在 + 当天数据真进了库）
+    Write-Output ""
+    Write-Output "[T8] SQLite 落库断言..."
+    $dbPath = Join-Path $run "数据\生产统计.db"
+    Assert (Test-Path $dbPath) "T8 数据库文件已创建" ("路径 " + $dbPath)
+    if (Test-Path $dbPath) {
+        # 用部署目录里的 System.Data.SQLite 读库（x64 互操作随 bin 一并拷在 run\x64\，PS x64 直接加载）
+        Add-Type -Path (Join-Path $run "System.Data.SQLite.dll")
+        $cs = "Data Source=" + $dbPath + ";Version=3;"
+        $db = New-Object System.Data.SQLite.SQLiteConnection -ArgumentList $cs
+        $db.Open()
+        $cmd = $db.CreateCommand()
+        # 断言整库（运行目录全新，库内数据全部来自本轮）：注意夜班(00:00-08:00)计数归属
+        # 昨天的 DayRecord（20:00 所在日期），所以不能按"今天"过滤，否则凌晨跑回归必挂
+        $cmd.CommandText = "SELECT COUNT(*), IFNULL(SUM(ok1+ok2+ok3),0) FROM hour_stat"
+        $reader = $cmd.ExecuteReader()
+        $rows = 0; $okSum = 0
+        if ($reader.Read()) { $rows = [int]$reader.GetInt64(0); $okSum = [int]$reader.GetInt64(1) }
+        $reader.Close()
+        $db.Close()
+        Assert ($rows -ge 1) "T8 小时行已落库" ("hour_stat 行数 " + $rows)
+        # 产量计数进库：脉冲源转了近 3 分钟，OK 合计必然 >0（链路：采集 → 内存 → 30 秒 UPSERT）
+        Assert ($okSum -gt 0) "T8 产量计数已入库" ("三单元 OK 合计 " + $okSum + "（>0 即计数链路写进库）")
     }
 }
 finally {

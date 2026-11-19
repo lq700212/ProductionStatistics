@@ -10,7 +10,7 @@
 
 ## 项目一句话
 
-三菱 FX5U 以太网采集 → 三单元（焊接/气密/贴标）OK·NG 计数 + 班次时间记账 → CSV 落盘 → Excel 导出。
+三菱 FX5U 以太网采集 → 三单元（焊接/气密/贴标）OK·NG 计数 + 班次时间记账 → SQLite 数据库落库【V2.3.1】→ Excel/CSV 导出。
 现场运行 exe = `ProductionStatistics.Wpf.exe`（程序集名保留 .Wpf 后缀，工程目录已去掉）。
 
 ## 技术栈与结构
@@ -66,6 +66,11 @@
    刷新方法里用 `英文界面` 三目选择——漏一处切语言时该词不跟着变。
 9. **统计口径改动必须先确认**：四类时间（生产/待料/报警/停止）互斥且完全覆盖，"四类之和=墙上时间"
    是验收标准；"自动中=1 但三单元全 IDLE 记生产还是记待料"属口径定义，改前必须与用户/客户确认。
+10. **复用优先，造轮子必沉淀**：接到任何需求（UI 控件/样式/令牌、通讯封装、通用工具），先查
+    `extern/kaleidoscope`（UI 语义键/控件族见 `Kaleidoscope.UI/README.md`；通讯复用
+    `HslPlcClient`）与本项目既有实现，**能复用尽量复用，禁止重复造轮子**；确实没有才从 0
+    自造，造完必须评估通用性——具备跨项目价值的沉淀进 kaleidoscope 子模块（令牌/样式/控件/
+    助手 + 其 README/CHANGELOG 同步），走子模块提交流程，供其他项目复用。
 
 ## 计数可靠性约定（本项目核心，改动前必读）
 
@@ -96,15 +101,16 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `ProductionStatistics/MainWindow.xaml(.cs)` | 主窗体：6 页签看板、KPI、单元状态、自绘窗口 |
+| `ProductionStatistics/MainWindow.xaml(.cs)` | 主窗体：7 页签看板（6 班次 + 历史查询【V2.3.1】）、KPI、单元状态、自绘窗口 |
 | `ProductionStatistics/Services/PlcCollector.cs` | 采集线程：合并读/逐点读、上升沿计数、时间记账、诊断日志 |
-| `ProductionStatistics/Services/StatisticsStore.cs` | 统计仓库：内存记录 + 30 秒 CSV 落盘（锁内拼文本、锁外写文件） |
+| `ProductionStatistics/Services/StatisticsStore.cs` | 统计仓库：内存记录 + 30 秒 SQLite 落库【V2.3.1】（锁内拷快照、锁外写库） |
+| `ProductionStatistics/Services/StatisticsDbStore.cs` | SQLite 库仓库【V2.3.1】：建库/UPSERT/读取/区间查询/历史 CSV 一次性导入（主存储 `数据\生产统计.db`，WAL；库内 `_库锁` 串行化，采集线程落库与 UI 线程查询并发安全） |
 | `ProductionStatistics/Services/AppConfig.cs` | ini 载入/缺省生成/主题写回（单例缓存） |
 | `ProductionStatistics/Services/ExcelExporter.cs` | Excel 导出（EPPlus，27 行 × 10 列） |
 | `ProductionStatistics/Business/TriggerDebouncer.cs` | 去抖器：OFF 持续时长确认 + 最小计时间隔（纯逻辑可单测） |
 | `ProductionStatistics/Business/PlcSignalResetter.cs` | 自锁位复位器（不复位地址集合） |
 | `ProductionStatistics/Business/PlcAddressConfig.cs` | 地址配置 + 合并读偏移表（11 位一次报文的地址算术） |
-| `ProductionStatistics/Business/ShiftStore.cs` | HourStat/DayRecord + CSV 存取（InvariantCulture 固定小数点） |
+| `ProductionStatistics/Business/ShiftStore.cs` | HourStat/DayRecord + CSV 解析（旧数据导入源）与查询导出格式（InvariantCulture 固定小数点；实时写 CSV 已移除【V2.3.1】） |
 | `ProductionStatistics/Business/Log.cs` | 按天滚动日志 + ERROR 镜像 |
 | `ProductionStatistics/Themes/Light|Dark.xaml` | 两套主题色板（键名一致，切主题=换字典） |
 | `extern/kaleidoscope/` | 通讯/UI 通用库（submodule，改动走子模块自己的提交流程） |
@@ -112,7 +118,7 @@
 | `libs/HslCommunication.dll` | 三菱 MC 3E 通讯库（商业授权；csproj 与 tools 的 FakePlc 都引用这一份，禁止各处私拷贝） |
 | `libs/EPPlus.dll` | Excel 导出库（4.x LGPL 版，不要升 5+ 商业授权版） |
 | `extern/` | 源码级依赖目录（当前只有 kaleidoscope submodule，其 libs/ 由子模块自己管） |
-| `部署运行目录（非仓库文件）` | exe 运行需带：`HslCommunication.dll`、`EPPlus.dll`、`Kaleidoscope.dll`、`Kaleidoscope.UI.dll`、`hsl.dat`、`生产统计.ini` |
+| `部署运行目录（非仓库文件）` | exe 运行需带：`HslCommunication.dll`、`EPPlus.dll`、`System.Data.SQLite.dll` + `x64\`/`x86\` 的 `SQLite.Interop.dll`【V2.3.1】、`Kaleidoscope.dll`、`Kaleidoscope.UI.dll`、`hsl.dat`、`生产统计.ini`；数据主存储 `数据\生产统计.db`（SQLite，首启自动建库并导入旧 CSV） |
 
 ## 构建与验证命令
 

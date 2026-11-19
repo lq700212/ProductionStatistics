@@ -124,6 +124,11 @@ namespace DocShot
                     ClickTab(3); Shot("03-main-yesterday-night.png", "昨天夜班（切换页签）");
                     ClickTab(0);
 
+                    // 【V2.3.1】历史查询页（第 7 页签）：种子 CSV 首启已自动入库，默认查今天
+                    // 就能看到演示数据；切回第 0 页签继续后续场景
+                    ClickTab(6); Thread.Sleep(2000); Shot("11-history-query.png", "历史查询页（日期区间 + 单元筛选查库，可导出 CSV）");
+                    ClickTab(0);
+
                     ClickAid("语言英文"); Shot("04-main-english.png", "英文界面");
                     ClickAid("语言中文");
 
@@ -219,6 +224,13 @@ namespace DocShot
             File.Copy(iniPath, Path.Combine(backupDir, "生产统计.ini"), true);
             CopyDir(dataDir, Path.Combine(backupDir, "数据"));
             CopyDir(logsDir, Path.Combine(backupDir, "logs"));
+            // 【V2.3.1】主存储换成 SQLite：拍演示数据必须走"空库 + 种子 CSV 自动导入"链路，
+            // 先清掉现场库文件（上面已备份），否则库非空会跳过导入，截图全是 0
+            foreach (string dbFile in new[] { "生产统计.db", "生产统计.db-wal", "生产统计.db-shm" })
+            {
+                string dbPath = Path.Combine(dataDir, dbFile);
+                if (File.Exists(dbPath)) File.Delete(dbPath);
+            }
             Log("BACKUP " + backupDir);
         }
 
@@ -538,7 +550,7 @@ namespace DocShot
         /// 尺寸/坐标，页签样式再改（更宽/更窄/更高/更低）都不影响。
         /// </summary>
         private static readonly string[] TabTexts =
-            { "当天白班产能", "当天夜班产能", "昨天白班产能", "昨天夜班产能", "前天白班产能", "前天夜班产能" };
+            { "当天白班产能", "当天夜班产能", "昨天白班产能", "昨天夜班产能", "前天白班产能", "前天夜班产能", "历史查询" };
 
         private static void ClickTab(int index)
         {
