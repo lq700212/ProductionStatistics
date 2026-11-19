@@ -85,3 +85,6 @@
 - 构建 0 error（MSB3245 为 kaleidoscope 库内串口引用固有警告，本工程不用串口服务）。
 - E2E 回归 12 PASS / 0 FAIL（含授权、合并读、计数带宽、时间守恒、重启无爆发）。
 - UI 冒烟：合并 Kaleidoscope.UI 字典后主窗正常启动，深浅主题切换正常。
+- 提交后卫生修复：`.gitmodules` 去除 UTF-8 BOM（此前经 PowerShell 重写时带入 BOM，
+  git 远端警告 `gitmodulesParse: could not parse gitmodules blob`，会导致他人 clone 后
+  submodule 无法初始化——已转无 BOM UTF-8 并复验 `git submodule status` 正常）。
