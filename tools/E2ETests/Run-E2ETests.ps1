@@ -13,6 +13,10 @@
 #   T7 无 ERROR        —— 全程日志零 ERROR 行
 #   T8 数据库落库      —— 【V2.3.1】主存储=SQLite：数据\生产统计.db 已建、当天小时行落库、
 #                          脉冲源产量计数进了库（三单元 OK 合计 >0）
+#   T9 登录·错误密码拒绝 —— 【V2.4.0】UIA 输 admin+错误密码：日志有"登录失败"、主窗不出现
+#   T10 登录·正确通过    —— 【V2.4.0】UIA 输 admin/123456：日志出现"主窗体初始化完成"
+#   T11 启动自动选页签   —— 【V2.4.0】日志"启动自动选页签: 序号=X"与当前时刻应选的班次一致
+#                          （8~19 点→0 当天白班；≥20 点→1 当天夜班；<8 点→3 昨天夜班）
 #
 # 用法（项目根执行）：
 #   powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
@@ -30,6 +34,8 @@
 #   - FakePlc 的模式文件由脚本显式传入（args[1]），并预先写好 "normal"，
 #     不依赖 %TEMP% 里的残留文件，保证脉冲源确定性（1.8s/脉冲 ≈33 件/分钟）。
 #   - 断言全部从运行日志文本提取（时间账目/本分钟产量/小时结算），不碰界面。
+#   - 【V2.4.0】exe 启动先弹登录窗，所有阶段启动 app 后都用 tools\DocShot\Invoke-UiaLogin.ps1
+#     做 UIA 自动登录（admin/123456，与 LoginService 预置账号一致）；登录助手点源自 DocShot 目录。
 # ======================================================================
 
 param(
@@ -144,11 +150,30 @@ if ($LASTEXITCODE -ne 0) { throw "FakePlc 编译失败" }
 $modeFile = Join-Path $run "fakeplc_mode.txt"
 [System.IO.File]::WriteAllText($modeFile, "normal", (New-Object System.Text.UTF8Encoding($false)))
 
+# 登录助手点源（【V2.4.0】exe 启动先弹登录窗，所有阶段都要 UIA 自动登录）
+. (Join-Path $root "tools\DocShot\Invoke-UiaLogin.ps1")
+
 # ---------------- 用例执行 ----------------
-function Start-Stack {
+#【V2.4.0】FakePlc 全程只起一次（阶段零起，阶段一/二复用，避免重复占用 6060 端口）；
+# Start-Stack 只管"起 app + 自动登录 + 等窗口期"。
+function Start-FakePlcOnce {
+    if (Get-Process "FakePlc" -ErrorAction SilentlyContinue) { return }
     Start-Process $fakeExe -ArgumentList @("6060", $modeFile, (Join-Path $run "fakeplc.log")) -WorkingDirectory $run -WindowStyle Hidden
     Start-Sleep -Seconds 2
+}
+
+function Start-AppWithLogin {
     Start-Process (Join-Path $run "ProductionStatistics.Wpf.exe") -WorkingDirectory $run
+    Start-Sleep -Seconds 3   # 等登录窗出现
+    $app = Get-Process "ProductionStatistics.Wpf" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($app -eq $null) { throw "app 进程未启动" }
+    $ok = Invoke-UiaLogin -Proc $app -User "admin" -Pass "123456" -TimeoutMs 30000
+    if (-not $ok) { throw "自动登录失败（主窗未出现）" }
+}
+
+function Start-Stack {
+    Start-FakePlcOnce
+    Start-AppWithLogin
     Start-Sleep -Seconds 75   # 覆盖启动 + 第一个完整"时间账目"分钟窗口
 }
 
@@ -166,6 +191,41 @@ $today = Get-Date -Format "yyyy-MM-dd"
 $logPath = Join-Path $run ("logs\运行日志_" + $today + ".log")
 
 try {
+    # ---------------- 阶段零：登录链路（T9 / T10 / T11）【V2.4.0】 ----------------
+    Write-Output ""
+    Write-Output "[阶段零] 登录链路（T9 错误密码拒绝 / T10 正确登录 / T11 启动自动选页签）..."
+    Start-FakePlcOnce
+
+    Start-Process (Join-Path $run "ProductionStatistics.Wpf.exe") -WorkingDirectory $run
+    Start-Sleep -Seconds 3
+    $app = Get-Process "ProductionStatistics.Wpf" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($app -eq $null) { throw "app 进程未启动" }
+
+    # T9 错误密码：填 admin + 错密码点登录，日志应有"登录失败"且主窗不出现
+    Invoke-UiaLogin -Proc $app -User "admin" -Pass "wrong-pass" -NoWaitMain | Out-Null
+    Start-Sleep -Seconds 2
+    $log0 = [System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8)
+    $log0Text = ($log0 -join "`n")
+    Assert ($log0Text -match "登录失败") "T9 错误密码被拒绝" "日志含'登录失败'"
+    Assert (-not ($log0Text -match "主窗体初始化完成")) "T9 错误密码不进主窗" "登录失败后无'主窗体初始化完成'"
+
+    # T10 正确登录：同窗再填 admin/123456，应出主窗
+    Invoke-UiaLogin -Proc $app -User "admin" -Pass "123456" | Out-Null
+    Start-Sleep -Seconds 3
+    $log0 = [System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8)
+    $log0Text = ($log0 -join "`n")
+    Assert ($log0Text -match "登录成功: admin") "T10 正确账号登录成功" "日志含'登录成功: admin'"
+    Assert ($log0Text -match "主窗体初始化完成") "T10 主窗已创建" "日志含'主窗体初始化完成'"
+
+    # T11 启动自动选页签：日志序号与当前时刻应选班次一致（口径与软件 自动选班次页签() 相同）
+    $hourNow = (Get-Date).Hour
+    if (($hourNow -ge 8) -and ($hourNow -lt 20)) { $期望页签 = 0 }
+    elseif ($hourNow -ge 20) { $期望页签 = 1 }
+    else { $期望页签 = 3 }
+    Assert ($log0Text -match ("启动自动选页签: 序号=" + $期望页签)) "T11 启动自动选页签正确" ("当前 " + $hourNow + " 点 → 期望序号=" + $期望页签)
+
+    Stop-AppOnly
+
     Write-Output ""
     Write-Output "[阶段一] 首次启动（T2 授权 / T3 合并读 / T4 计数 / T5 时间账目）..."
     Start-Stack
@@ -208,11 +268,17 @@ try {
         }
     }
 
-    # T6 重启无爆发（残留 ON 场景：FakePlc 继续跑，只杀软件再启）
+    # T6 重启无爆发（残留 ON 场景：FakePlc 继续跑，只杀软件再启；重启后同样要先过登录）
     Write-Output ""
     Write-Output "[阶段二] 重启软件（复现现场'残留 ON 重启'事故场景）..."
     Stop-AppOnly
+    Start-FakePlcOnce
     Start-Process (Join-Path $run "ProductionStatistics.Wpf.exe") -WorkingDirectory $run
+    Start-Sleep -Seconds 3
+    $app2 = Get-Process "ProductionStatistics.Wpf" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($app2 -eq $null) { throw "重启后 app 进程未启动" }
+    $ok2 = Invoke-UiaLogin -Proc $app2 -User "admin" -Pass "123456" -TimeoutMs 30000
+    if (-not $ok2) { throw "重启后自动登录失败" }
     Start-Sleep -Seconds 75
 
     $log2 = [System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8)

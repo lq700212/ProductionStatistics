@@ -48,7 +48,7 @@ IMAGES_DIR = DOCS_DIR / "images"
 APP_NAME = "生产统计"
 APP_NAME_EN = "Production Statistics"
 TARGET = "点胶固化收料机"
-DELIVERY_VERSION = "0.0.5"
+DELIVERY_VERSION = "0.0.6"
 
 # 三份文档：key 供 check_docs.py 引用，file 必须与实际文件名一致
 DOCUMENTS = {
@@ -101,7 +101,10 @@ FEATURES = {
     "db_autoload": True,                # 【V2.3.1】启动从库载入最近三天续算
     "db_csv_import": True,              # 【V2.3.1】库为空时自动一次性导入旧版按天 CSV（幂等）
     "csv_export_history": True,         # 【V2.3.1】历史查询结果导出 CSV（CSV 已不是主存储）
-    "excel_export": True,               # EPPlus，导出整天两班
+    "excel_export": True,               # 【V2.4.0】EPPlus，历史查询结果导出 Excel（原顶栏按钮已改为"设置"）
+    "login_account": True,              # 【V2.4.0】启动登录窗，预置账号 admin/123456（代码内置，无权限分级）
+    "auto_shift_tab_on_start": True,    # 【V2.4.0】启动按当前时刻自动选"正在进行中"的班次页签
+    "settings_dropdown_placeholder": True,  # 【V2.4.0】顶栏"设置"下拉为占位（后续挂实际设置功能）
     "bilingual_ui": True,               # 中文 / English 运行中切换
     "dark_light_theme": True,           # 深色 / 浅色
     "alarm_duration": True,             # 报警时长累计（分钟，1 位小数）
@@ -111,7 +114,7 @@ FEATURES = {
     "rolling_log": True,                # 按天日志，保留 30 天
     "error_log_mirror": True,           # ERROR 镜像到 错误日志.txt
     "single_instance_guard": False,     # 未实现！双开会争抢 SQLite 库
-    "login_permission": False,          # 无账号 / 权限 / 授权体系
+    "login_permission": False,          # 登录窗已有【V2.4.0】但无角色/权限分级（单预置账号）
     "mes_integration": False,
     "recipe_management": False,
     "database": True,                   # 【V2.3.1】SQLite 单文件库（数据\生产统计.db，WAL）
@@ -147,7 +150,7 @@ RUNTIME = {
     "db_hour_rows_per_day": 24,   # 【V2.3.1】库表一天 24 行小时桶（白班 12 + 夜班 12）
     "csv_columns": 14,            # 旧版按天 CSV 列数（仅作导入源/查询导出格式）
     "csv_lines_per_day": 25,      # 表头 + 白班 12 + 夜班 12（同上，导入源口径）
-    "export_rows": 27,            # 表头 + 白班 12 + 白班合计 + 夜班 12 + 夜班合计
+    "query_export_columns": 12,   # 【V2.4.0】历史查询导出（Excel/CSV）列数：日期/班次/时段+9 数据列
     "day_shift_start": 8,
     "night_shift_start": 20,
 }
@@ -178,6 +181,7 @@ PLC_ADDRESS_KEYS = [
 
 # 交付目录只允许这些图片；多一张少一张都报错，防止内部调试图混入
 IMAGE_FILES = [
+    "00-login.png",
     "01-main-today-day.png",
     "02-main-yesterday-day.png",
     "03-main-yesterday-night.png",
@@ -359,7 +363,9 @@ def read_source_constants() -> dict:
     check("ProductionStatistics/Services/StatisticsStore.cs", r"30", "CSV 30 秒落盘")
     check("ProductionStatistics/Business/ShiftStore.cs", r"RowsPerShift", "每班 12 行")
     check("ProductionStatistics/Business/Log.cs", r"30", "日志保留 30 天")
-    check("ProductionStatistics/Services/ExcelExporter.cs", r"27", "导出 27 行")
+    check("ProductionStatistics/Services/ExcelExporter.cs", r"导出查询结果", "查询结果导出 Excel（V2.4.0 口径）")
+    check("ProductionStatistics/Business/LoginService.cs", r"预置用户名", "登录预置账号（V2.4.0）")
+    check("ProductionStatistics/MainWindow.xaml.cs", r"自动选班次页签", "启动自动选班次页签（V2.4.0）")
     return {"ok": all(item["ok"] for item in checks), "items": checks}
 
 

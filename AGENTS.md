@@ -105,6 +105,8 @@
 | `ProductionStatistics/Services/PlcCollector.cs` | 采集线程：合并读/逐点读、上升沿计数、时间记账、诊断日志 |
 | `ProductionStatistics/Services/StatisticsStore.cs` | 统计仓库：内存记录 + 30 秒 SQLite 落库【V2.3.1】（锁内拷快照、锁外写库） |
 | `ProductionStatistics/Services/StatisticsDbStore.cs` | SQLite 库仓库【V2.3.1】：建库/UPSERT/读取/区间查询/历史 CSV 一次性导入（主存储 `数据\生产统计.db`，WAL；库内 `_库锁` 串行化，采集线程落库与 UI 线程查询并发安全） |
+| `ProductionStatistics/LoginWindow.xaml(.cs)` | 登录窗【V2.4.0】：ChromeDialogWindow 弹窗基类 + 库控件族，启动先登录后主窗 |
+| `ProductionStatistics/Business/LoginService.cs` | 登录验证【V2.4.0】：预置账号 admin/123456（写死源码），成败写日志 |
 | `ProductionStatistics/Services/AppConfig.cs` | ini 载入/缺省生成/主题写回（单例缓存） |
 | `ProductionStatistics/Services/ExcelExporter.cs` | Excel 导出（EPPlus，27 行 × 10 列） |
 | `ProductionStatistics/Business/TriggerDebouncer.cs` | 去抖器：OFF 持续时长确认 + 最小计时间隔（纯逻辑可单测） |
@@ -114,7 +116,7 @@
 | `ProductionStatistics/Business/Log.cs` | 按天滚动日志 + ERROR 镜像 |
 | `ProductionStatistics/Themes/Light|Dark.xaml` | 两套主题色板（键名一致，切主题=换字典） |
 | `extern/kaleidoscope/` | 通讯/UI 通用库（submodule，改动走子模块自己的提交流程） |
-| `tools/DocShot/` | 文档截图 harness（FakePlc 假 PLC / 核验脚本 / PDF 转换） |
+| `tools/DocShot/` | 文档截图 harness（FakePlc 假 PLC / Invoke-UiaLogin 自动登录 / 核验脚本 / PDF 转换） |
 | `libs/HslCommunication.dll` | 三菱 MC 3E 通讯库（商业授权；csproj 与 tools 的 FakePlc 都引用这一份，禁止各处私拷贝） |
 | `libs/EPPlus.dll` | Excel 导出库（4.x LGPL 版，不要升 5+ 商业授权版） |
 | `extern/` | 源码级依赖目录（当前只有 kaleidoscope submodule，其 libs/ 由子模块自己管） |

@@ -112,6 +112,11 @@ namespace DocShot
                 PatchIni();
                 StartFake();
                 StartApp();
+                // 【V2.4.0】启动先弹登录窗：等登录窗 → 拍登录窗截图 → UIA 自动登录（admin/123456，
+                // 与 LoginService 预置账号一致）→ 等真主窗。主窗查找改按标题匹配（见 WaitMainWindow）。
+                WaitLoginWindow();
+                CaptureWindow(loginHwnd, "00-login.png", "登录窗（预置账号 admin，操作员版登录章节用图）");
+                LoginViaUia();
                 WaitMainWindow();
                 Thread.Sleep(6000); // 让真实采集线程跑几轮，界面有实时状态
 
@@ -125,8 +130,8 @@ namespace DocShot
                     ClickTab(0);
 
                     // 【V2.3.1】历史查询页（第 7 页签）：种子 CSV 首启已自动入库，默认查今天
-                    // 就能看到演示数据；切回第 0 页签继续后续场景
-                    ClickTab(6); Thread.Sleep(2000); Shot("11-history-query.png", "历史查询页（日期区间 + 单元筛选查库，可导出 CSV）");
+                    // 就能看到演示数据；切回第 0 页签继续后续场景（【V2.4.0】面板内含导出 Excel / CSV 两钮）
+                    ClickTab(6); Thread.Sleep(2000); Shot("11-history-query.png", "历史查询页（日期区间 + 单元筛选查库，可导出 Excel / CSV）");
                     ClickTab(0);
 
                     ClickAid("语言英文"); Shot("04-main-english.png", "英文界面");
@@ -140,8 +145,8 @@ namespace DocShot
                     Shot("07-main-idle.png", "单元待料状态（三单元 IDLE 亮，显示空闲）");
                     WriteMode("normal"); Thread.Sleep(2000);
 
-                    // 离线先拍：此时本时段还没有报警记录，提示卡保持“本时段无报警”，
-                    // 不会出现“离线”与“报警 0.0 分钟”并存的误导画面。
+                    // 离线先拍：此时本时段还没有报警记录，不会出现“离线”与
+                    // “报警 0.0 分钟”并存的误导画面（提示卡已删【V2.4.0】，状态条口径不变）。
                     StopFake();
                     // 顶栏和底栏分别由“连接状态事件”和“1 秒定时器”刷新，可能差一拍；
                     // 两处都显示失败再拍，避免出现“顶栏离线、底栏运行中”的自相矛盾截图。
@@ -155,7 +160,7 @@ namespace DocShot
 
                     WriteMode("alarm");
                     WaitAidText("状态条文字", "报警中", 8000);
-                    Thread.Sleep(6000); // 让本时段报警时间累计到 0.1 分钟，提示卡不显示 0.0
+                    Thread.Sleep(6000); // 让本时段报警时间累计到 0.1 分钟，底栏数字不为 0.0
                     Shot("06-main-alarm.png", "设备报警状态");
                     WriteMode("normal"); Thread.Sleep(2000);
                 }
@@ -390,23 +395,105 @@ namespace DocShot
             Log("APP started pid=" + app.Id);
         }
 
+        // 登录窗句柄（【V2.4.0】启动时第一个窗口）
+        private static IntPtr loginHwnd = IntPtr.Zero;
+
+        /// <summary>
+        /// 等登录窗出现（【V2.4.0】软件启动的第一道门）。
+        /// 用标题精确匹配"用户登录/Sign in"而不是 MainWindowHandle：登录窗是进程第一个
+        /// 窗口时 MainWindowHandle 偶发拿不准，且登录成功后进程"主窗"会切换，标题匹配最稳。
+        /// </summary>
+        private static void WaitLoginWindow()
+        {
+            for (int i = 0; i < 60; i++)
+            {
+                Thread.Sleep(500);
+                foreach (IntPtr h in TopWindowsOf((uint)app.Id))
+                {
+                    if (!IsWindowVisible(h)) continue;
+                    var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                    string title = t.ToString();
+                    if (title == "用户登录" || title == "Sign in") { loginHwnd = h; break; }
+                }
+                if (loginHwnd != IntPtr.Zero) break;
+            }
+            if (loginHwnd == IntPtr.Zero) throw new Exception("登录窗口未出现");
+            Log("LOGIN HWND=" + loginHwnd);
+            SetForegroundWindow(loginHwnd);
+            Thread.Sleep(1000);
+        }
+
+        /// <summary>
+        /// UIA 自动登录【V2.4.0】：按 AutomationId 找 用户名输入/密码输入/登录按钮
+        /// （WPF 的 x:Name 自动映射 AutomationId），ValuePattern 填值 + 后台线程 Invoke 点击。
+        /// 【坑】窗口刚出现时 WPF 的 UIA 内容树可能没建好——每轮重试都重新 FromHandle
+        /// 重建根元素（缓存的空树不会自己刷新）。
+        /// </summary>
+        private static void LoginViaUia()
+        {
+            AutomationElement user = null, pass = null, btn = null;
+            for (int i = 0; i < 20 && (user == null || pass == null || btn == null); i++)
+            {
+                try
+                {
+                    var root = AutomationElement.FromHandle(loginHwnd);
+                    user = root.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.AutomationIdProperty, "用户名输入"));
+                    pass = root.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.AutomationIdProperty, "密码输入"));
+                    btn = root.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.AutomationIdProperty, "登录按钮"));
+                }
+                catch { }
+                if (user == null || pass == null || btn == null) Thread.Sleep(300);
+            }
+            if (user == null || pass == null || btn == null)
+            {
+                failCount++;
+                Log("LOGIN ERROR 登录窗元素缺失（用户名/密码/按钮）");
+                return;
+            }
+            try
+            {
+                ((ValuePattern)user.GetCurrentPattern(ValuePattern.Pattern)).SetValue("admin");
+                ((ValuePattern)pass.GetCurrentPattern(ValuePattern.Pattern)).SetValue("123456");
+            }
+            catch (Exception ex)
+            {
+                failCount++;
+                Log("LOGIN ERROR 填值失败: " + ex.Message);
+                return;
+            }
+            InvokeAsync(btn, "登录按钮");
+            Log("LOGIN 已点击登录按钮");
+        }
+
+        /// <summary>
+        /// 等真主窗出现（【V2.4.0】登录之后）。改按标题匹配"生产履历/Production History"：
+        /// Process.MainWindowHandle/MainWindowTitle 在登录窗→主窗切换时会缓存旧值不刷新
+        /// （.NET 已知行为，PowerShell harness 同坑），标题枚举不受缓存影响。
+        /// </summary>
         private static void WaitMainWindow()
         {
             for (int i = 0; i < 60; i++)
             {
                 Thread.Sleep(500);
-                try
+                foreach (IntPtr h in TopWindowsOf((uint)app.Id))
                 {
-                    app.Refresh();
-                    mainHwnd = app.MainWindowHandle;
-                    if (mainHwnd != IntPtr.Zero && !string.IsNullOrEmpty(app.MainWindowTitle)) break;
+                    if (!IsWindowVisible(h)) continue;
+                    var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                    string title = t.ToString();
+                    if (title.StartsWith("生产履历") || title.StartsWith("Production History"))
+                    {
+                        mainHwnd = h;
+                        Log("MAIN HWND=" + mainHwnd + " TITLE=" + title);
+                        SetForegroundWindow(mainHwnd);
+                        Thread.Sleep(1000);
+                        return;
+                    }
                 }
-                catch { }
             }
-            if (mainHwnd == IntPtr.Zero) throw new Exception("主窗口未出现");
-            Log("MAIN HWND=" + mainHwnd + " TITLE=" + app.MainWindowTitle);
-            SetForegroundWindow(mainHwnd);
-            Thread.Sleep(1000);
+            throw new Exception("主窗口未出现（登录后）");
         }
 
         // ===================== 看门狗 =====================
@@ -763,7 +850,9 @@ namespace DocShot
         /// 在“另存为”对话框里找“文件名”编辑框。
         /// 不能只认 AutomationId=1001：实测该 ID 命中的是顶部“搜索”框（把目录文字当成
         /// 搜索词显示在搜索框里），对它 SetValue 会抛 ElementNotEnabledException。
-        /// 改按位置筛：位于对话框纵向 60% 之后、宽度超过对话框 30% 的 Edit 即文件名框。
+        /// 旧路径按位置筛（纵向 60% 之后、宽度超 30% 的 Edit）；【V2.4.0】补充 Win11 形态：
+        /// 文件名框可能暴露成 ControlType=Pane、ClassName=Edit、Name=当前文件名（含 .xlsx）——
+        /// 两路都试，谁命中用谁。
         /// </summary>
         private static AutomationElement FindFileNameEdit(IntPtr dlg, int timeoutMs)
         {
@@ -777,6 +866,7 @@ namespace DocShot
                     if (dh > 0 && dw > 0)
                     {
                         var root = AutomationElement.FromHandle(dlg);
+                        // 旧路径：ControlType.Edit + 位置筛（跳过顶部搜索框）
                         var edits = root.FindAll(TreeScope.Descendants,
                             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
                         foreach (AutomationElement e in edits)
@@ -784,6 +874,14 @@ namespace DocShot
                             var b = e.Current.BoundingRectangle;
                             if (b.Height > 10 && b.Width > dw * 0.3 && b.Top > dr.Top + dh * 0.6)
                                 return e;
+                        }
+                        // 新路径（Win11）：ClassName=Edit 且 Name 是文件名（含扩展名）
+                        var all = root.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+                        foreach (AutomationElement e in all)
+                        {
+                            if (e.Current.ClassName != "Edit") continue;
+                            string n = e.Current.Name ?? "";
+                            if (n.EndsWith(".xlsx") || n.EndsWith(".csv")) return e;
                         }
                     }
                 }
@@ -927,13 +1025,19 @@ namespace DocShot
             WriteMode("normal");
             Thread.Sleep(1500);
 
+            // 【V2.4.0】导出 Excel 已收拢进历史查询页签（顶栏原按钮改为"设置"下拉）：
+            // 切到第 7 页签 → 点"导出 Excel" → 另存为 → 成功提示 → 切回班次页签。
+            ClickTab(6);
+            Thread.Sleep(2000);
+
             // 导出落点必须是「客户看着正常」的目录：不能用 %TEMP%\docshot_export，
             // 否则截图 09/10 会带出内部工具名和 Administrator 用户名，客户文档不能用。
             string dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
                 "ProductionHistoryExport");
             Directory.CreateDirectory(dir);
-            string fileName = "生产履历_" + DateTime.Today.ToString("yyyy-MM-dd") + ".xlsx";
+            string fileName = "生产履历查询_" + DateTime.Today.ToString("yyyy-MM-dd") + "_"
+                + DateTime.Today.ToString("yyyy-MM-dd") + ".xlsx";
             string xlsx = Path.Combine(dir, fileName);
 
             // 先清掉同名文件：否则保存对话框会弹"确认另存为"，流程就卡在覆盖确认上（实测踩中）
@@ -944,23 +1048,23 @@ namespace DocShot
             };
             foreach (string f in stale) { try { if (File.Exists(f)) File.Delete(f); } catch { } }
 
-            var exportBtn = FindAid("导出按钮");
+            var exportBtn = FindAid("查询导出Excel按钮");
             if (exportBtn == null) { failCount++; Log("EXPORT BUTTON MISSING"); return; }
             // 用 UIA Invoke 在后台线程触发：Invoke 会同步等到保存对话框关闭，
             // 放主线程会卡住整个截图流程；放后台线程则主线程可以继续等窗口。
-            InvokeAsync(exportBtn, "导出按钮");
+            InvokeAsync(exportBtn, "查询导出Excel按钮");
 
             IntPtr dlg = WaitDialog("另存为", 15000);
             if (dlg == IntPtr.Zero) { failCount++; Log("SAVE DIALOG MISSING"); return; }
             lock (knownDialogs) { knownDialogs.Add(dlg); }
             Thread.Sleep(800);
-            // 先导航到临时目录再截图：默认落在用户“文档”，会把真实文档名拍进客户文档。
+            // 先导航到临时目录再截图：默认落在用户"文档"，会把真实文档名拍进客户文档。
             NavigateDialog(dlg, dir);
             ClearDialogSearch(dlg);
             Thread.Sleep(600);
 
             // 文件名：导航后该编辑框可能被重建（旧元素禁用/失效），所以统一走
-            // “重新查找 + 等可用”的路径；UIA 设置失败再退回键盘输入兜底。
+            // "重新查找 + 等可用"的路径；UIA 设置失败再退回键盘输入兜底。
             if (!SetFileNameByUia(dlg, fileName))
             {
                 Log("SET filename via UIA 失败，改用键盘输入");
@@ -969,18 +1073,50 @@ namespace DocShot
             Thread.Sleep(300);
             CaptureWindow(dlg, "09-export-save-dialog.png", "导出-保存对话框");
 
-            // 保存按钮用鼠标点（UIA Invoke 会同步等到 MessageBox 关闭，卡住发送线程）
+            // 保存按钮：优先 UIA Invoke（后台线程）；【V2.4.0】本机 Win11 对话框把按钮暴露成
+            // ControlType=Pane、ClassName=Button（且"保存类型:"标签也以"保存"开头）——
+            // 按 ClassName=Button + 名称精确匹配，Invoke 不可用再退回鼠标点击。
             var dlgRoot = AutomationElement.FromHandle(dlg);
-            var buttons = dlgRoot.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            var allEls = dlgRoot.FindAll(TreeScope.Descendants, Condition.TrueCondition);
             AutomationElement save = null;
-            foreach (AutomationElement e in buttons)
+            foreach (AutomationElement e in allEls)
             {
-                string n = e.Current.Name;
-                if (n.Contains("保存") || n.StartsWith("Save")) { save = e; break; }
+                string n = e.Current.Name ?? "";
+                if (e.Current.ClassName == "Button" && (n.StartsWith("保存") || n.StartsWith("Save"))) { save = e; break; }
+            }
+            if (save == null)
+            {
+                var buttons = dlgRoot.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+                foreach (AutomationElement e in buttons)
+                {
+                    string n = e.Current.Name ?? "";
+                    if (n.Contains("保存") || n.StartsWith("Save")) { save = e; break; }
+                }
             }
             if (save == null) { failCount++; Log("SAVE BUTTON MISSING"); return; }
-            InvokeAsync(save, "保存");
+            bool invoked = false;
+            try
+            {
+                object p;
+                if (save.TryGetCurrentPattern(InvokePattern.Pattern, out p))
+                {
+                    var t = new Thread(delegate() { try { ((InvokePattern)p).Invoke(); } catch { } });
+                    t.IsBackground = true; t.Start();
+                    invoked = true;
+                }
+            }
+            catch { }
+            if (!invoked)
+            {
+                // 鼠标点按钮中心（UIA Invoke 不可用时的兜底，实测 Pane 形态按钮没有 InvokePattern）
+                var sr = save.Current.BoundingRectangle;
+                SetCursorPos((int)(sr.Left + sr.Width / 2), (int)(sr.Top + sr.Height / 2));
+                Thread.Sleep(200);
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(60);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+            }
 
             IntPtr msg = WaitDialog("导出", 20000);
             if (msg == IntPtr.Zero) { failCount++; Log("EXPORT MESSAGEBOX MISSING"); return; }
@@ -1009,6 +1145,7 @@ namespace DocShot
                 }
                 catch (Exception ex) { Log("XLSX CLEAN FAIL " + f + " " + ex.Message); }
             }
+
         }
 
         private static string ReadDialogText(IntPtr h)

@@ -11,6 +11,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Exe,        # 待截图的 exe 路径
     [Parameter(Mandatory = $true)][string]$OutDir,     # 截图输出目录（自动创建）
+    [string]$LoginUser = 'admin',                      # 【V2.4.0】登录窗自动登录用户名（空=不登录，截登录窗）
+    [string]$LoginPass = '123456',                     # 【V2.4.0】登录窗自动登录密码
     [string]$States = 'Restored',                      # 状态列表，逗号分隔：Restored,Maximized
                                                        # （powershell -File 对数组参数支持差，统收单字符串再拆）
     [int]$Crops = 260,                                 # 角部裁剪边长（物理像素）
@@ -42,14 +44,23 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $exeFull = (Resolve-Path $Exe).Path
 $proc = Start-Process -FilePath $exeFull -WorkingDirectory (Split-Path $exeFull) -PassThru
 
-# 等主窗口句柄（最长 30 秒；PLC 连不上不影响出窗）
+# 【V2.4.0】启动先弹登录窗：点源自动登录助手，等待登录窗 → （给了 LoginUser 就自动登录）→ 等主窗
+. (Join-Path $PSScriptRoot 'Invoke-UiaLogin.ps1')
+
 $h = [IntPtr]::Zero
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
-    $proc.Refresh()
-    if ($proc.MainWindowHandle -ne 0) { $h = $proc.MainWindowHandle; break }
+    $p2 = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue   # 每轮新对象（缓存坑见助手脚本注释）
+    if ($p2 -and $p2.MainWindowHandle -ne 0) { $h = $p2.MainWindowHandle; break }
 }
-if ($h -eq [IntPtr]::Zero) { throw "30 秒内未等到主窗口：$exeFull" }
+if ($h -eq [IntPtr]::Zero) { throw "30 秒内未等到窗口：$exeFull" }
+
+if ($LoginUser -ne '') {
+    # 有账号就自动登录并等主窗出现（标题含 生产履历/Production History）
+    $ok = Invoke-UiaLogin -Proc $proc -User $LoginUser -Pass $LoginPass -TimeoutMs 30000
+    if (-not $ok) { throw "自动登录失败：$exeFull" }
+    $h = (Get-Process -Id $proc.Id).MainWindowHandle
+}
 Start-Sleep -Seconds $SettleSeconds
 
 # 拍一张：PrintWindow 到位图；返回位图。失败（全黑）时回退屏幕拷贝。

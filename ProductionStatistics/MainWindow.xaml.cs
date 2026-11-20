@@ -19,12 +19,14 @@ namespace ProductionStatistics
     /// 主窗体（生产履历统计界面）—— WPF 版。
     ///
     /// 做什么（与 WinForms 版一一对应，界面换皮、逻辑不变）：
-    ///   顶栏：设备名 / PLC 连接状态 / 时钟 / 主题开关(深浅) / 中英切换 / 导出 Excel
+    ///   顶栏：设备名 / PLC 连接状态 / 时钟 / 主题开关(深浅) / 中英切换 / 设置下拉（占位【V2.4.0】）
     ///   页签：当天·昨天·前天 × 白班·夜班 共 6 页（两行文字：班次名 + 日期，跨天自动更新）
-    ///        + 第 7 页"历史查询"（按日期区间+单元从数据库查询、导出 CSV）【V2.3.1】
+    ///        + 第 7 页"历史查询"（按日期区间+单元从数据库查询、导出 Excel / CSV）
+    ///        启动时按当前时刻自动选中"正在进行中"的班次页签【V2.4.0】
     ///   KPI：当前页签的总产能 / OK / NG / 良率 / 稼动率 / 生产时间
     ///   主表：12 个小时行 + 班次合计行，列与现场 HMI 一致
-    ///   右侧：设备状态（自动中/报警/稼动率环）+ 三单元 OK/NG/IDLE + 提示
+    ///   右侧：设备状态（自动中/报警/稼动率环）+ 三单元 OK/NG/IDLE（提示卡已删【V2.4.0】，
+    ///         报警/离线与底栏状态条重复，两处冗余没有意义）
     ///   底栏：设备运行/暂停/报警/离线四态 + 采样与落盘信息
     ///
     /// 运行流程：
@@ -107,6 +109,9 @@ namespace ProductionStatistics
             页签列表 = new ObservableCollection<TabView>();
             // 7 个页签 = 6 个班次页签（今天/昨天/前天 × 白/夜）+ 第 7 个"历史查询"工具页签【V2.3.1】
             for (int i = 0; i < 7; i++) 页签列表.Add(new TabView());
+            // 启动时按当前时刻自动选中"正在进行中"的班次页签【V2.4.0】，
+            // 必须在 应用语言()（内部会按 选中页签 刷表格/KPI）之前设好
+            自动选班次页签();
             查询行 = new ObservableCollection<QueryRow>();
             // 历史查询面板默认查"今天"（起止都选今天，切进页签时 切换历史视图 会自动执行一次查询）
             查询起始.SelectedDate = DateTime.Today;
@@ -150,6 +155,24 @@ namespace ProductionStatistics
                 + " | 数据目录=" + ShiftStore.DataDir + " | 日志目录=" + Log.LogDir);
         }
 
+        /// <summary>
+        /// 启动时按当前时刻自动选中"正在进行中"的班次页签【V2.4.0】。
+        /// 口径与 刷新单元状态() 的班次归属完全一致（同一时刻"正在记账"的班次桶）：
+        ///   08:00~19:59 → 当天白班（页签 0）
+        ///   20:00~23:59 → 当天夜班（页签 1，今晚 20:00 起的班次正在进行）
+        ///   00:00~07:59 → 昨天夜班（页签 3）：凌晨属于**昨天 20:00 起的夜班**，
+        ///                 桶记在昨天的 NightShift 里——当天夜班页签此刻还是全 0 的未来时段，
+        ///                 停在那里会看到空看板。
+        /// 只在启动时选一次；运行中跨班次（如 8 点整）不自动切页签，避免操作员正在看的
+        /// 画面被程序强行换掉。
+        /// </summary>
+        private void 自动选班次页签()
+        {
+            int h = DateTime.Now.Hour;
+            选中页签 = (h >= 8 && h < 20) ? 0 : (h >= 20 ? 1 : 3);
+            Log.Info("启动自动选页签: 序号=" + 选中页签 + " 当前时刻=" + DateTime.Now.ToString("HH:mm:ss"));
+        }
+
         /// <summary>1 秒刷新定时器：刷时钟 → 跨天刷页签日期 → 脏标志成立才刷表格/KPI/单元状态 → 刷状态条</summary>
         private void 刷新定时器_Tick(object sender, EventArgs e)
         {
@@ -165,7 +188,6 @@ namespace ProductionStatistics
                 刷新表格();
                 刷新KPI();
                 刷新单元状态();
-                刷新提示();
             }
             刷新状态条();
             // PLC 连接状态每秒与采集线程的实际状态对齐（不依赖事件是否送达，避免顶栏与实际不一致）
@@ -313,51 +335,6 @@ namespace ProductionStatistics
             }
         }
 
-        /// <summary>
-        /// 设置提示框语义态：Tag 契约 = 库 KxInfoBox（底/描边）+ KxStatusDot（灯色）+ StatusChipText（文字色）。
-        /// 三处必须同步设同一个 Tag，否则会出现"底色红、文字灰"的错位。
-        /// 语义：Pri=正常（主色）/ Ng=离线或报警（红）。
-        /// </summary>
-        private void 设置提示(string 语义, string 文字)
-        {
-            提示框.Tag = 语义;
-            提示指示灯.Tag = 语义;
-            提示文字.Tag = 语义;
-            提示文字.Text = 文字;
-        }
-
-        /// <summary>刷新提示卡：报警时段提示 / 离线提示 / 正常提示</summary>
-        private void 刷新提示()
-        {
-            if (采集 != null && !采集.IsPlcOnline)
-            {
-                设置提示("Ng", 英文界面 ? "PLC disconnected, retrying..." : "PLC连接失败……重试中");
-                return;
-            }
-            // 找当前小时有没有报警时间，有就提示出来
-            DateTime NowTime = DateTime.Now;
-            bool 是白班 = NowTime.Hour >= 8 && NowTime.Hour < 20;
-            int hourIndex = 是白班 ? NowTime.Hour - 8 : (NowTime.Hour >= 20 ? NowTime.Hour - 20 : NowTime.Hour + 4);
-            DateTime 归属日期 = 是白班 ? NowTime.Date
-                                : (NowTime.Hour >= 20 ? NowTime.Date : NowTime.Date.AddDays(-1));
-            double 报警秒 = 0;
-            lock (统计.锁)
-            {
-                DayRecord rec = 统计.取记录(归属日期);
-                HourStat hs = 是白班 ? rec.DayShift[hourIndex] : rec.NightShift[hourIndex];
-                报警秒 = hs.AlarmSec;
-            }
-            if (报警秒 > 0)
-            {
-                设置提示("Ng", (英文界面 ? "Alarm " : "报警 ") + (报警秒 / 60.0).ToString("F1", CultureInfo.InvariantCulture)
-                    + (英文界面 ? " min in this hour" : " 分钟（本时段）"));
-            }
-            else
-            {
-                设置提示("Pri", 英文界面 ? "No alarm in this hour" : "本时段无报警");
-            }
-        }
-
         /// <summary>设置底栏状态语义（KxStatusDot 灯色 + StatusChipText 文字色，Tag 必须同步）。</summary>
         private void 设置状态条(string 语义, string 文字)
         {
@@ -446,20 +423,18 @@ namespace ProductionStatistics
                 刷新表格();
                 刷新KPI();
             }
-            刷新提示();
         }
 
         /// <summary>
         /// 班次视图 ⇄ 历史查询视图切换【V2.3.1】：只换主区可见性（顶栏/页签栏/右侧栏/状态条共用不动）。
-        /// 进历史查询时默认查今天并立即执行，让用户一进来就有数；顶栏"导出 Excel"按班次日期导整天、
-        /// 历史页没有"当前班次"概念，禁用避免歧义（导出走查询面板的"导出 CSV"按钮）。
+        /// 进历史查询时默认查今天并立即执行，让用户一进来就有数。
+        /// 【V2.4.0】原"顶栏导出按钮禁用"逻辑随按钮一起删除：导出 Excel 已收拢进查询面板。
         /// </summary>
         private void 切换历史视图(bool 历史态)
         {
             KPI区.Visibility = 历史态 ? Visibility.Collapsed : Visibility.Visible;
             表格卡片.Visibility = 历史态 ? Visibility.Collapsed : Visibility.Visible;
             查询面板.Visibility = 历史态 ? Visibility.Visible : Visibility.Collapsed;
-            导出按钮.IsEnabled = !历史态;
             if (历史态)
             {
                 查询起始.SelectedDate = DateTime.Today;
@@ -477,7 +452,6 @@ namespace ProductionStatistics
             // 主题换了，动态着色的部件要按新主题重刷一次
             刷新连接状态(采集 != null && 采集.IsPlcOnline);
             刷新状态条();
-            刷新提示();
         }
 
         /// <summary>语言按钮：切换中/英文（只影响界面显示，CSV/Excel 文件格式固定中文）</summary>
@@ -511,11 +485,16 @@ namespace ProductionStatistics
             Title = (英文 ? "Production History - " : "生产履历 - ") + 设备显示名();
             标题文字.Text = 英文 ? "Production History" : "生产履历";
             副标题文字.Text = 英文 ? "Machine Name: " + 设备显示名() : "Machine Name: " + 设备显示名();
-            导出按钮.Content = 英文 ? "Export Excel" : "导出 Excel";
+            // 顶栏"设置"按钮与下拉占位项【V2.4.0】（原"导出 Excel"按钮已改为设置入口）
+            设置按钮.Content = 英文 ? "Settings" : "设置";
+            设置按钮.ToolTip = 英文 ? "Settings menu" : "设置菜单";
+            设置项一.Header = 英文 ? "Feature 1 (placeholder)" : "功能 1（占位）";
+            设置项二.Header = 英文 ? "Feature 2 (placeholder)" : "功能 2（占位）";
+            设置项三.Header = 英文 ? "Feature 3 (placeholder)" : "功能 3（占位）";
             语言中文.IsChecked = !英文;
             语言英文.IsChecked = 英文;
 
-            // 右侧栏静态文字（漏网的那几处：设备状态/自动中/报警/稼动率/单元栏/提示）
+            // 右侧栏静态文字（漏网的那几处：设备状态/自动中/报警/稼动率/单元栏）
             设备状态标题.Text = 英文 ? "Machine Status" : "设备状态";
             自动中标题.Text = 英文 ? "Auto Running" : "设备自动中";
             报警标题.Text = 英文 ? "Alarm" : "设备报警";
@@ -523,7 +502,6 @@ namespace ProductionStatistics
             稼动率说明.Text = 英文 ? "Production ÷ Total" : "生产 ÷（生产+待料+报警+停止）";
             稼动率说明.ToolTip = 英文 ? "Production ÷ (Production + Idle + Alarm + Stop)" : "生产 ÷（生产+待料+报警+停止）";
             单元栏标题.Text = 英文 ? "Unit Status / Shift Totals" : "单元状态 / 本班统计";
-            提示标题.Text = 英文 ? "Notice" : "提示";
             // 窗口按钮与主题开关的悬浮提示
             主题开关.ToolTip = 英文 ? "Dark / Light theme" : "深色 / 浅色主题";
             最小化按钮.ToolTip = 英文 ? "Minimize" : "最小化";
@@ -553,8 +531,9 @@ namespace ProductionStatistics
                 : new[] { "全部单元", PlcCollector.单元名称[0], PlcCollector.单元名称[1], PlcCollector.单元名称[2] };
             查询单元.SelectedIndex = 查询单元选中 < 0 ? 0 : 查询单元选中;
             查询按钮.Content = 英文 ? "Query" : "查询";
+            查询导出Excel按钮.Content = 英文 ? "Export Excel" : "导出 Excel";
+            查询导出Excel按钮.ToolTip = 英文 ? "Export current query result to Excel" : "把当前查询结果导出为 Excel";
             查询导出按钮.Content = 英文 ? "Export CSV" : "导出 CSV";
-            导出按钮.ToolTip = 英文 ? "Export current shift day to Excel" : "导出当前页签所属日期的 Excel";
             string[] 查询列头 = 英文
                 ? new[] { "Date", "Shift", "Period", "Output\n(PCS)", "OK Qty\n(PCS)", "NG Qty\n(PCS)", "Yield%",
                           "Prod. Time\n(Min)", "Idle Time\n(Min)", "Alarm Time\n(Min)", "Stop Time\n(Min)", "Utilization%" }
@@ -569,7 +548,6 @@ namespace ProductionStatistics
             刷新单元状态();
             刷新连接状态(采集 != null && 采集.IsPlcOnline);
             刷新状态条();
-            刷新提示();
             // 历史查询结果里的"班次"等文字随语言变：结果快照按新语言重跑一次当前查询【V2.3.1】
             if (选中页签 == 6) 执行查询();
             语言切换中 = 原标志;
@@ -584,32 +562,32 @@ namespace ProductionStatistics
             return AppConfig.设备名称;
         }
 
-        /// <summary>导出 Excel：按当前页签所属日期导出整天白班+夜班完整履历</summary>
-        private void 导出按钮_Click(object sender, RoutedEventArgs e)
+        // ===================== 设置下拉（顶栏）【V2.4.0】 =====================
+
+        /// <summary>
+        /// 设置按钮：弹出下拉菜单。原"导出 Excel"按钮改为设置入口（导出收拢进历史查询面板），
+        /// 菜单项目前全是占位（后续在此挂实际设置功能：用户管理 / 参数设置等）。
+        /// 库菜单四要点①（ShellStyles.xaml WinContextMenu 注释）：编程式 IsOpen=true
+        /// 不锚定宿主会弹到屏幕 (0,0)，必须先显式 PlacementTarget=本按钮。
+        /// </summary>
+        private void 设置按钮_Click(object sender, RoutedEventArgs e)
         {
-            DateTime date = DateTime.Today.AddDays(-(选中页签 / 2));
-            var dlg = new SaveFileDialog
-            {
-                Filter = "Excel 文件 (*.xlsx)|*.xlsx",
-                FileName = "生产履历_" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".xlsx"
-            };
-            if (dlg.ShowDialog() != true) return;
-            try
-            {
-                DayRecord rec;
-                lock (统计.锁) { rec = 统计.取记录(date); }
-                string[] 列头 = new string[10];
-                for (int i = 0; i < 10; i++) 列头[i] = 表格.Columns[i].Header.ToString().Replace("\n", "");
-                ExcelExporter.导出(dlg.FileName, date, rec, 设备显示名(), 列头);
-                MessageBox.Show(this, (英文界面 ? "Exported:\n" : "导出成功：\n") + dlg.FileName,
-                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("导出 Excel 失败", ex);
-                MessageBox.Show(this, (英文界面 ? "Export failed: " : "导出失败：") + ex.Message,
-                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            var btn = sender as Button;
+            if (btn == null || btn.ContextMenu == null) return;
+            btn.ContextMenu.PlacementTarget = btn;
+            btn.ContextMenu.Placement = PlacementMode.Bottom;
+            btn.ContextMenu.IsOpen = true;
+        }
+
+        /// <summary>下拉占位项统一入口：点击提示"功能开发中"，日志留痕（后续逐项接真实功能）</summary>
+        private void 设置项_Click(object sender, RoutedEventArgs e)
+        {
+            var item = sender as MenuItem;
+            string 名称 = item == null ? "?" : (item.Header == null ? "?" : item.Header.ToString());
+            Log.Info("设置下拉点击: " + 名称 + "（占位项，功能未实现）");
+            MessageBox.Show(this,
+                英文界面 ? "This feature is under development." : "该功能正在开发中。",
+                英文界面 ? "Settings" : "设置", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         // ===================== 历史查询（第 7 页签）【V2.3.1】 =====================
@@ -680,6 +658,50 @@ namespace ProductionStatistics
                 var row = new QueryRow();
                 row.设置(d, 班次文字, titles[i], s, 单元);
                 rows.Add(row);
+            }
+        }
+
+        /// <summary>
+        /// 导出 Excel【V2.4.0】：把当前查询结果（日期区间 × 单元筛选，同屏所见即所得）写成 xlsx。
+        /// 原"导出 Excel"在顶栏（按单个班次日导出），现随"设置"按钮改造收拢进历史查询面板。
+        /// 列头与查询表格显示一致（随语言），数值列写真正的数字（Excel 里可直接求和/筛选）。
+        /// </summary>
+        private void 查询导出Excel按钮_Click(object sender, RoutedEventArgs e)
+        {
+            if (查询行.Count == 0)
+            {
+                MessageBox.Show(this, 英文界面 ? "No rows. Click Query first." : "暂无查询结果，请先点\"查询\"。",
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var dlg = new SaveFileDialog
+            {
+                Filter = "Excel 文件 (*.xlsx)|*.xlsx",
+                FileName = "生产履历查询_"
+                    + (查询起始.SelectedDate ?? DateTime.Today).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    + "_" + (查询截止.SelectedDate ?? DateTime.Today).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    + ".xlsx"
+            };
+            if (dlg.ShowDialog() != true) return;
+            try
+            {
+                // 列头直接取查询表格当前显示（含语言），去掉表头里的换行符与 CSV 导出同口径
+                var 列头 = new string[查询表格.Columns.Count];
+                for (int i = 0; i < 列头.Length; i++)
+                    列头[i] = 查询表格.Columns[i].Header.ToString().Replace("\n", "");
+                // 快照：锁外已经有 查询行 集合（查询结果本身就是快照），直接拷引用列表即可
+                var rows = new List<QueryRow>(查询行);
+                string 单元名 = (查询单元.SelectedItem as string) ?? (英文界面 ? "All Units" : "全部单元");
+                ExcelExporter.导出查询结果(dlg.FileName, rows, 列头, 设备显示名(), 单元名);
+                Log.Info("历史查询导出 Excel: " + dlg.FileName + " (" + rows.Count + " 行)");
+                MessageBox.Show(this, (英文界面 ? "Exported:\n" : "导出成功：\n") + dlg.FileName,
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("历史查询导出 Excel 失败", ex);
+                MessageBox.Show(this, (英文界面 ? "Export failed: " : "导出失败：") + ex.Message,
+                    英文界面 ? "Export" : "导出", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -896,8 +918,11 @@ namespace ProductionStatistics
                 页签区.SetResourceReference(Border.CornerRadiusProperty, "Fn.ShellRadiusBottom");
                 状态条区.SetResourceReference(Border.CornerRadiusProperty, "Fn.ShellRadius");
             }
+            // 还原图标【V2.4.0】几何整体左移 1px（原 M5.5,5.5 ... 边界 3.5~12.5，
+            // 中心在 8,8 而图标画布是 14×14、中心 7,7，实测还原态图标右下偏 1px）：
+            // 现边界 2.5~11.5，与最大化图标同为中心 7,7
             最大化图标.Data = 最大化
-                ? Geometry.Parse("M5.5,5.5 H12.5 V12.5 H5.5 Z M3.5,10.5 V3.5 H10.5")
+                ? Geometry.Parse("M4.5,4.5 H11.5 V11.5 H4.5 Z M2.5,9.5 V2.5 H9.5")
                 : Geometry.Parse("M3.5,3.5 H10.5 V10.5 H3.5 Z");
         }
 

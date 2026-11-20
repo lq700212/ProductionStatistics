@@ -25,14 +25,14 @@
 
 | | |
 | --- | --- |
-| ![当天白班](docs/images/01-main-today-day.png) | ![英文界面](docs/images/04-main-english.png) |
-| 主界面：7 页签看板（6 班次 + 历史查询）+ KPI + 单元状态 + 设备状态条 | 中英一键切换（表格/按钮/状态全跟随） |
+| ![登录窗](docs/images/00-login.png) | ![当天白班](docs/images/01-main-today-day.png) |
+| 登录窗：启动先验证（预置账号 admin），风格与主窗同一套控件族 | 主界面：7 页签看板（6 班次 + 历史查询）+ KPI + 单元状态 + 设备状态条 |
 | ![深色主题](docs/images/05-main-dark.png) | ![报警状态](docs/images/06-main-alarm.png) |
-| 深色主题（右上角开关即时切换并写回 ini） | 报警状态：提示卡与状态条变红，报警时间进统计 |
+| 深色主题（右上角开关即时切换并写回 ini） | 报警状态：状态条与右栏徽标变红，报警时间进统计 |
 | ![待料状态](docs/images/07-main-idle.png) | ![离线状态](docs/images/08-main-offline.png) |
 | 待料状态：三单元 IDLE 指示与待料时间 | PLC 离线：顶栏/底栏红字提示，自动重连不丢账 |
 | ![导出对话框](docs/images/09-export-save-dialog.png) | ![导出成功](docs/images/10-export-success.png) |
-| Excel 导出：按页签日期导整天白班+夜班完整履历 | 导出成功提示 |
+| Excel 导出：历史查询页签内按查询结果导出（所见即所得） | 导出成功提示 |
 
 ## 快速开始
 
@@ -51,7 +51,7 @@ dotnet build ProductionStatistics\ProductionStatistics.csproj -c Debug
 #  + 生产统计.ini（首次运行自动生成缺省配置）
 #    注：数据主存储 数据\生产统计.db 首次运行自动建库，发现旧版 CSV 会自动导入
 
-# ④ 端到端自动化回归（计数/存储逻辑改动后必跑，8 组用例）
+# ④ 端到端自动化回归（计数/存储/登录改动后必跑，11 组用例，含 UIA 自动登录）
 powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
 
 # ⑤ 主题键契约静态检查（改主题键/库样式/主窗控件键后必跑）
@@ -68,13 +68,20 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.p
   单轮采样周期实测 109ms（老 4 次报文 200~330ms），漏采窗口减半；
 - **班次看板**：白班 08:00–20:00 / 夜班 20:00–次日 08:00 固定口径，12 小时行 + 合计行，
   KPI（总产能/OK/NG/良率/稼动率/生产时间）+ 稼动率圆环 + 三单元实时状态；
+- **登录窗【V2.4.0】**：启动先弹登录弹窗（`ChromeDialogWindow` + 库控件族，预置账号
+  admin/123456，`LoginService` 验证并记日志），验证通过才进主窗与采集；关闭登录窗 = 退出。
+  无角色/权限分级（单预置账号），登录窗只做身份确认；
+- **看板自动选班次【V2.4.0】**：启动按当前时刻自动停在"正在进行中"的班次页签
+  （8~19 点→当天白班、≥20 点→当天夜班、凌晨→昨天夜班，与时间记账归属口径一致）；
 - **6+1 页签**：当天/昨天/前天 × 白/夜班 6 页签跨天自动刷新；第 7 页"历史查询"按日期区间 +
-  单元筛选从库取数、结果导出 CSV；
+  单元筛选从库取数，结果可导出 **Excel 或 CSV**；顶栏原"导出 Excel"按钮改为"设置"下拉
+  （占位菜单，后续挂实际设置功能）；右侧栏"提示"卡已删（与底栏状态条信息重复）；
 - **SQLite 数据库主存储**：`数据\生产统计.db` 单文件（WAL 模式断电自恢复），每 30 秒 UPSERT
   落库（最坏丢 30 秒，与旧 CSV 同级可靠），启动载入最近三天续算，重启不断账；库为空时
   自动一次性导入旧版 CSV（升级零手工迁移），此后 CSV 只作历史查询导出格式；
-- **Excel 导出**：EPPlus 输出 27 行 × 10 列完整履历（标题/表头/两班 12 小时行+合计）；
-  历史查询结果另支持 CSV 导出（UTF-8 BOM）；
+- **Excel / CSV 导出【V2.4.0】**：历史查询面板内一键导出**当前查询结果**（日期/班次/时段 +
+  9 数据列共 12 列，所见即所得；Excel 数值列写真正数字可求和筛选，CSV UTF-8 BOM）；
+  原按天 27×10 固定格式随顶栏按钮一并下线；
 - **中英双语 + 深浅主题**：语言运行中一键切换（CSV/Excel 固定中文格式），主题切换写回 ini；
   颜色/阴影全部走库 `Brush.Shell.*` 语义键 + 动态资源，主题开关/胶囊/状态灯用 `Tag` 语义着色，
   两本主题键集由 `Run-ThemeContractTests.ps1` 静态校验（各 133 键、键集一致）；
@@ -102,12 +109,15 @@ graph LR
     end
 
     subgraph APP[ProductionStatistics.Wpf]
+        LOGIN[LoginWindow + LoginService<br/>启动登录（预置 admin）]
         COL[PlcCollector 采集线程<br/>合并读 11 位 / 上升沿计数 / 时间记账]
         STORE[StatisticsStore + StatisticsDbStore<br/>内存统计 + 30 秒 SQLite 落库]
         EXP[ExcelExporter<br/>EPPlus]
         MAIN[MainWindow<br/>1 秒 DispatcherTimer<br/>7 页签（6 班次 + 历史查询）]
     end
 
+    LOGIN -.->|验证通过| MAIN
+    MAIN -.->|查询结果导出| EXP
     PLC -->|合并读 11 位| COL
     COL -->|写回 false 复位自锁位| PLC
     LIC -.->|读取注册| AUTH
@@ -119,8 +129,7 @@ graph LR
     STORE -->|30 秒 UPSERT（WAL）| DB[(数据/生产统计.db<br/>SQLite 主存储)]
     STORE -->|1 秒定时器拉取| MAIN
     MAIN -.->|历史查询 / CSV 导出| DB
-    MAIN -->|点导出按钮| EXP
-    STORE -.->|当天记录| EXP
+    STORE -.->|查询结果行| EXP
     EXP --> XLSX[(xlsx 履历)]
     COL -.->|连接状态事件 + 脏标志| MAIN
     UI -.->|样式注入| MAIN
@@ -141,10 +150,11 @@ graph LR
 ```text
 ProductionStatistics/                    # 仓库根
 ├── ProductionStatistics/                # 主工程（WPF，.NET Framework 4.7.2）
-│   ├── MainWindow.xaml(.cs)             # 主窗体：7 页签看板（6 班次 + 历史查询）/ KPI / 自绘窗口
-│   ├── App.xaml(.cs)                    # 入口：日志初始化 / 全局异常兜底 / 主题切换
+│   ├── MainWindow.xaml(.cs)             # 主窗体：7 页签看板（6 班次 + 历史查询）/ KPI / 设置下拉 / 自绘窗口
+│   ├── LoginWindow.xaml(.cs)            # 登录窗【V2.4.0】：ChromeDialogWindow 弹窗基类 + 库控件族
+│   ├── App.xaml(.cs)                    # 入口：日志初始化 / 异常兜底 / 主题切换 / 登录编排（先登录后主窗）
 │   ├── Services/                        # PlcCollector 采集 / StatisticsStore+StatisticsDbStore 落库 / AppConfig / ExcelExporter
-│   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / ShiftStore CSV 存取 / Log
+│   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / ShiftStore CSV 存取 / Log / LoginService 登录验证
 │   ├── ViewModels/ Controls/ Themes/    # 表格行·查询行模型 / 样式 / 两套主题色板
 │   └── Resources/                       # exe 图标
 ├── libs/                                # 第三方二进制依赖（HslCommunication / EPPlus / System.Data.SQLite + x64\x86 原生互操作，必须入库）
@@ -153,9 +163,9 @@ ProductionStatistics/                    # 仓库根
 │   └── Kaleidoscope.UI/                 #   WPF 复用控件库（键板 / Fresh·Kx 控件族 / 圆角窗基类）
 ├── docs/                                # 三份培训文档（操作员/客户技术/内部版）+ 截图
 ├── tools/
-│   ├── E2ETests/                        # ★ 端到端回归 8 组用例（含 T8 落库断言）+ 主题键契约静态检查
+│   ├── E2ETests/                        # ★ 端到端回归 11 组用例（T8 落库 + T9~T11 登录/自动选页签）+ 主题键契约静态检查
 │   │                                    #   另有 DocShot/shot_window.ps1 轻量窗口截图取证
-│   └── DocShot/                         # 文档截图 harness（FakePlc 假 PLC / 核验 / PDF 转换）
+│   └── DocShot/                         # 文档截图 harness（FakePlc 假 PLC / Invoke-UiaLogin 自动登录 / 核验 / PDF 转换）
 ├── AGENTS.md                            # AI 协作规范（改代码前必读）
 ├── CHANGELOG.md                         # 版本改动记录
 └── ProductionStatistics.sln
@@ -209,6 +219,8 @@ ProductionStatistics/                    # 仓库根
 
 ## 注意事项
 
+- **登录账号为出厂预置**（admin/123456，写死在 `LoginService.cs`）：首次部署后建议联系
+  我方修改；登录窗只做身份确认，无角色权限分级——按人限权需二次开发。
 - PLC 离线时程序不崩：界面红字提示、每 60 秒日志留痕、恢复后自动续采；
   但**断线时段的触发脉冲无法补采**（PLC 侧自锁位保持 ON，恢复后按"残留基准"处理不补计）——
   长时间离线建议现场核对 PLC 侧实际件数后用历史查询导出人工核对修正。

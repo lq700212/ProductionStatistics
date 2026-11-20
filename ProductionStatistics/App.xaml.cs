@@ -14,7 +14,9 @@ namespace ProductionStatistics
     ///   ① 启动即初始化运行日志（logs 文件夹），任何后续异常都留得下痕迹；
     ///   ② 挂 UI 线程异常与 AppDomain 未处理异常，异常不再"无声瘫痪"；
     ///   ③ 主题切换：把 Application 资源里合并的主题字典换成另一套（Light/Dark），
-    ///      控件样式里的颜色全是 DynamicResource，所以换完立即全界面生效，窗口不用重建。
+    ///      控件样式里的颜色全是 DynamicResource，所以换完立即全界面生效，窗口不用重建；
+    ///   ④ 用户登录【V2.4.0】：先弹登录窗（预置 admin 账号）模态验证，通过才创建主窗，
+    ///      关闭登录窗 = 取消登录直接退出。
     ///
     /// 主题来源：生产统计.ini 的 [界面] 主题=深色/浅色（缺省跟随系统）。
     /// </summary>
@@ -49,6 +51,29 @@ namespace ProductionStatistics
             // ③ 读配置并应用主题（在窗口创建之前，窗口出来就是对的配色）
             AppConfig.载入();
             切换主题(AppConfig.取主题());
+
+            // ④ 用户登录【V2.4.0】：先弹登录窗（模态），验证通过才创建主窗。
+            //    【坑】登录窗是进程里第一个窗口，WPF 会把它认作 Application.MainWindow；
+            //    若用 OnMainWindowClose/OnLastWindowClose，登录窗一关（主窗还没建）
+            //    就会排队 Shutdown，把刚显示出来的主窗跟着关掉（实测：主窗初始化完成
+            //    日志后紧跟"软件退出"）。所以登录期间用 OnExplicitShutdown——关登录窗
+            //    不触发退出；登录通过、主窗 Show 之后再显式指定主窗并把模式切回
+            //    OnMainWindowClose，此后关主窗=正常退出（走主窗 OnClosing 落库链路）。
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var 登录窗 = new LoginWindow();
+            if (登录窗.ShowDialog() == true)
+            {
+                Log.Info("登录通过，进入主窗");
+                var 主窗 = new MainWindow();
+                主窗.Show();
+                MainWindow = 主窗;                          // 显式指定：真正的看板主窗
+                ShutdownMode = ShutdownMode.OnMainWindowClose;
+            }
+            else
+            {
+                Log.Info("登录取消或关闭，程序退出");
+                Shutdown();
+            }
         }
 
         /// <summary>
