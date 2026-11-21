@@ -3,7 +3,7 @@
 文档核验配置（唯一事实源）
 ==========================
 
-本文件集中登记「生产统计（WPF 0.0.4）」这次交付的真实边界：
+本文件集中登记「生产统计（WPF 0.0.7）」这次交付的真实边界：
   · 实际存在的功能 / 明确不存在的功能
   · 硬件品牌全集与实际配置（仅三菱 FX5U，无相机 / 光源 / 扫码枪）
   · 三份文档各自的角色、字数、表格、图片、必需章节
@@ -48,7 +48,7 @@ IMAGES_DIR = DOCS_DIR / "images"
 APP_NAME = "生产统计"
 APP_NAME_EN = "Production Statistics"
 TARGET = "点胶固化收料机"
-DELIVERY_VERSION = "0.0.6"
+DELIVERY_VERSION = "0.0.7"
 
 # 三份文档：key 供 check_docs.py 引用，file 必须与实际文件名一致
 DOCUMENTS = {
@@ -102,7 +102,7 @@ FEATURES = {
     "db_csv_import": True,              # 【V2.3.1】库为空时自动一次性导入旧版按天 CSV（幂等）
     "csv_export_history": True,         # 【V2.3.1】历史查询结果导出 CSV（CSV 已不是主存储）
     "excel_export": True,               # 【V2.4.0】EPPlus，历史查询结果导出 Excel（原顶栏按钮已改为"设置"）
-    "login_account": True,              # 【V2.4.0】启动登录窗，预置账号 admin/123456（代码内置，无权限分级）
+    "login_account": True,              # 【V2.4.0/V2.4.1】预置账号 admin/123456，顶栏"登录"按钮按需弹窗（无权限分级）
     "auto_shift_tab_on_start": True,    # 【V2.4.0】启动按当前时刻自动选"正在进行中"的班次页签
     "settings_dropdown_placeholder": True,  # 【V2.4.0】顶栏"设置"下拉为占位（后续挂实际设置功能）
     "bilingual_ui": True,               # 中文 / English 运行中切换
@@ -114,7 +114,7 @@ FEATURES = {
     "rolling_log": True,                # 按天日志，保留 30 天
     "error_log_mirror": True,           # ERROR 镜像到 错误日志.txt
     "single_instance_guard": False,     # 未实现！双开会争抢 SQLite 库
-    "login_permission": False,          # 登录窗已有【V2.4.0】但无角色/权限分级（单预置账号）
+    "login_permission": False,          # 登录已有【V2.4.0/V2.4.1】但无角色/权限分级（单预置账号，不登录也能用）
     "mes_integration": False,
     "recipe_management": False,
     "database": True,                   # 【V2.3.1】SQLite 单文件库（数据\生产统计.db，WAL）

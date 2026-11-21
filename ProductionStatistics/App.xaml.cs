@@ -15,8 +15,8 @@ namespace ProductionStatistics
     ///   ② 挂 UI 线程异常与 AppDomain 未处理异常，异常不再"无声瘫痪"；
     ///   ③ 主题切换：把 Application 资源里合并的主题字典换成另一套（Light/Dark），
     ///      控件样式里的颜色全是 DynamicResource，所以换完立即全界面生效，窗口不用重建；
-    ///   ④ 用户登录【V2.4.0】：先弹登录窗（预置 admin 账号）模态验证，通过才创建主窗，
-    ///      关闭登录窗 = 取消登录直接退出。
+    ///   ④ 主窗【V2.4.1】：启动直接创建看板主窗，不再强制登录——不登录也能查看统计与导出；
+    ///      登录改为顶栏"登录"按钮按需弹出（见 MainWindow.登录按钮_Click）。
     ///
     /// 主题来源：生产统计.ini 的 [界面] 主题=深色/浅色（缺省跟随系统）。
     /// </summary>
@@ -52,28 +52,16 @@ namespace ProductionStatistics
             AppConfig.载入();
             切换主题(AppConfig.取主题());
 
-            // ④ 用户登录【V2.4.0】：先弹登录窗（模态），验证通过才创建主窗。
-            //    【坑】登录窗是进程里第一个窗口，WPF 会把它认作 Application.MainWindow；
-            //    若用 OnMainWindowClose/OnLastWindowClose，登录窗一关（主窗还没建）
-            //    就会排队 Shutdown，把刚显示出来的主窗跟着关掉（实测：主窗初始化完成
-            //    日志后紧跟"软件退出"）。所以登录期间用 OnExplicitShutdown——关登录窗
-            //    不触发退出；登录通过、主窗 Show 之后再显式指定主窗并把模式切回
-            //    OnMainWindowClose，此后关主窗=正常退出（走主窗 OnClosing 落库链路）。
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            var 登录窗 = new LoginWindow();
-            if (登录窗.ShowDialog() == true)
-            {
-                Log.Info("登录通过，进入主窗");
-                var 主窗 = new MainWindow();
-                主窗.Show();
-                MainWindow = 主窗;                          // 显式指定：真正的看板主窗
-                ShutdownMode = ShutdownMode.OnMainWindowClose;
-            }
-            else
-            {
-                Log.Info("登录取消或关闭，程序退出");
-                Shutdown();
-            }
+            // ④ 主窗【V2.4.1】：启动直接进入看板，不再强制登录。
+            //    登录改为主窗顶栏"登录"按钮按需弹窗（LoginWindow.ShowDialog），
+            //    不登录也能查看统计/导出；登录只做身份确认（预置 admin，无权限分级）。
+            //    ShutdownMode 用 OnMainWindowClose：关主窗=正常退出（走主窗 OnClosing 落库链路），
+            //    登录窗是主窗的模态子窗，关它只取消本次登录，不会退出程序。
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            var 主窗 = new MainWindow();
+            MainWindow = 主窗;                              // 显式指定：看板主窗
+            主窗.Show();
+            Log.Info("主窗已显示（未登录状态，登录入口在主窗顶栏）");
         }
 
         /// <summary>

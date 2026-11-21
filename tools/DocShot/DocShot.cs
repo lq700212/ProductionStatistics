@@ -112,12 +112,15 @@ namespace DocShot
                 PatchIni();
                 StartFake();
                 StartApp();
-                // 【V2.4.0】启动先弹登录窗：等登录窗 → 拍登录窗截图 → UIA 自动登录（admin/123456，
-                // 与 LoginService 预置账号一致）→ 等真主窗。主窗查找改按标题匹配（见 WaitMainWindow）。
-                WaitLoginWindow();
-                CaptureWindow(loginHwnd, "00-login.png", "登录窗（预置账号 admin，操作员版登录章节用图）");
-                LoginViaUia();
+                // 【V2.4.1】启动直接进主窗（不再强制登录）：等主窗 → 点顶栏"登录按钮"打开登录窗
+                // → 拍登录窗截图 → UIA 自动登录（admin/123456，与 LoginService 预置账号一致）
+                // → 等登录窗关闭（DialogResult=true）。主窗/登录窗都按标题匹配枚举。
                 WaitMainWindow();
+                ClickAid("登录按钮");
+                WaitLoginWindow();
+                CaptureWindow(loginHwnd, "00-login.png", "登录窗（顶栏登录按钮弹出，预置账号 admin，操作员版登录章节用图）");
+                LoginViaUia();
+                WaitLoginClosed();
                 Thread.Sleep(6000); // 让真实采集线程跑几轮，界面有实时状态
 
                 Watchdog();
@@ -395,13 +398,13 @@ namespace DocShot
             Log("APP started pid=" + app.Id);
         }
 
-        // 登录窗句柄（【V2.4.0】启动时第一个窗口）
+        // 登录窗句柄（【V2.4.1】点主窗顶栏"登录按钮"后弹出的模态子窗）
         private static IntPtr loginHwnd = IntPtr.Zero;
 
         /// <summary>
-        /// 等登录窗出现（【V2.4.0】软件启动的第一道门）。
-        /// 用标题精确匹配"用户登录/Sign in"而不是 MainWindowHandle：登录窗是进程第一个
-        /// 窗口时 MainWindowHandle 偶发拿不准，且登录成功后进程"主窗"会切换，标题匹配最稳。
+        /// 等登录窗出现（【V2.4.1】点主窗顶栏"登录按钮"后弹出）。
+        /// 用标题精确匹配"用户登录/Sign in"：登录窗是主窗的模态子窗，
+        /// Process.MainWindowHandle 只会返回主窗，必须按标题枚举进程顶层窗口。
         /// </summary>
         private static void WaitLoginWindow()
         {
@@ -424,8 +427,9 @@ namespace DocShot
         }
 
         /// <summary>
-        /// UIA 自动登录【V2.4.0】：按 AutomationId 找 用户名输入/密码输入/登录按钮
-        /// （WPF 的 x:Name 自动映射 AutomationId），ValuePattern 填值 + 后台线程 Invoke 点击。
+        /// UIA 自动登录【V2.4.0，V2.4.1 改为顶栏按需弹窗后沿用】：
+        /// 按 AutomationId 找 用户名输入/密码输入/登录按钮（WPF 的 x:Name 自动映射
+        /// AutomationId），ValuePattern 填值 + 后台线程 Invoke 点击。
         /// 【坑】窗口刚出现时 WPF 的 UIA 内容树可能没建好——每轮重试都重新 FromHandle
         /// 重建根元素（缓存的空树不会自己刷新）。
         /// </summary>
@@ -469,8 +473,8 @@ namespace DocShot
         }
 
         /// <summary>
-        /// 等真主窗出现（【V2.4.0】登录之后）。改按标题匹配"生产履历/Production History"：
-        /// Process.MainWindowHandle/MainWindowTitle 在登录窗→主窗切换时会缓存旧值不刷新
+        /// 等主窗出现（【V2.4.1】启动即主窗，不再等登录）。按标题匹配"生产履历/Production History"：
+        /// Process.MainWindowHandle/MainWindowTitle 在窗口切换时会缓存旧值不刷新
         /// （.NET 已知行为，PowerShell harness 同坑），标题枚举不受缓存影响。
         /// </summary>
         private static void WaitMainWindow()
@@ -493,7 +497,31 @@ namespace DocShot
                     }
                 }
             }
-            throw new Exception("主窗口未出现（登录后）");
+            throw new Exception("主窗口未出现");
+        }
+
+        /// <summary>
+        /// 等登录窗关闭（【V2.4.1】验证通过 → DialogResult=true → ShowDialog 返回 → 登录窗关闭）。
+        /// 用标题枚举判断（同 WaitMainWindow 的缓存坑）；超时记失败但不打断后续截图流水线，
+        /// 让人工能从日志一眼看出"登录没成功、后面截图可能被登录窗挡住"。
+        /// </summary>
+        private static void WaitLoginClosed()
+        {
+            for (int i = 0; i < 60; i++)
+            {
+                Thread.Sleep(500);
+                bool 还在 = false;
+                foreach (IntPtr h in TopWindowsOf((uint)app.Id))
+                {
+                    if (!IsWindowVisible(h)) continue;
+                    var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                    string title = t.ToString();
+                    if (title == "用户登录" || title == "Sign in") { 还在 = true; break; }
+                }
+                if (!还在) { Log("LOGIN CLOSED 登录窗已关闭"); return; }
+            }
+            failCount++;
+            Log("LOGIN ERROR 登录窗未关闭（验证失败）");
         }
 
         // ===================== 看门狗 =====================

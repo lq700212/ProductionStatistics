@@ -44,22 +44,26 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $exeFull = (Resolve-Path $Exe).Path
 $proc = Start-Process -FilePath $exeFull -WorkingDirectory (Split-Path $exeFull) -PassThru
 
-# 【V2.4.0】启动先弹登录窗：点源自动登录助手，等待登录窗 → （给了 LoginUser 就自动登录）→ 等主窗
+# 【V2.4.1】启动直接进主窗（不再强制登录）：
+#   - 给了 LoginUser：点主窗顶栏"登录按钮"→ 自动登录 → 等登录窗关闭 → 截主窗；
+#   - LoginUser 为空：点开登录窗但不登录，截登录窗本身（演示/文档用）。
 . (Join-Path $PSScriptRoot 'Invoke-UiaLogin.ps1')
 
-$h = [IntPtr]::Zero
-for ($i = 0; $i -lt 60; $i++) {
-    Start-Sleep -Milliseconds 500
-    $p2 = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue   # 每轮新对象（缓存坑见助手脚本注释）
-    if ($p2 -and $p2.MainWindowHandle -ne 0) { $h = $p2.MainWindowHandle; break }
-}
-if ($h -eq [IntPtr]::Zero) { throw "30 秒内未等到窗口：$exeFull" }
+$h = Wait-AppWindow $proc.Id "生产履历|Production History" 30000
+if ($h -eq [IntPtr]::Zero) { throw "30 秒内未等到主窗：$exeFull" }
 
 if ($LoginUser -ne '') {
-    # 有账号就自动登录并等主窗出现（标题含 生产履历/Production History）
     $ok = Invoke-UiaLogin -Proc $proc -User $LoginUser -Pass $LoginPass -TimeoutMs 30000
     if (-not $ok) { throw "自动登录失败：$exeFull" }
-    $h = (Get-Process -Id $proc.Id).MainWindowHandle
+    $h = Wait-AppWindow $proc.Id "生产履历|Production History" 5000
+} else {
+    # 只打开登录窗（不登录），供截登录窗界面
+    $openBtn = Find-Aid $h "登录按钮"
+    if ($openBtn -ne $null) {
+        Invoke-Button $openBtn
+        $loginH = Wait-AppWindow $proc.Id "用户登录|Sign in" 15000
+        if ($loginH -ne [IntPtr]::Zero) { $h = $loginH }
+    }
 }
 Start-Sleep -Seconds $SettleSeconds
 

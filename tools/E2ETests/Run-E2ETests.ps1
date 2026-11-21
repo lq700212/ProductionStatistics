@@ -34,8 +34,9 @@
 #   - FakePlc 的模式文件由脚本显式传入（args[1]），并预先写好 "normal"，
 #     不依赖 %TEMP% 里的残留文件，保证脉冲源确定性（1.8s/脉冲 ≈33 件/分钟）。
 #   - 断言全部从运行日志文本提取（时间账目/本分钟产量/小时结算），不碰界面。
-#   - 【V2.4.0】exe 启动先弹登录窗，所有阶段启动 app 后都用 tools\DocShot\Invoke-UiaLogin.ps1
-#     做 UIA 自动登录（admin/123456，与 LoginService 预置账号一致）；登录助手点源自 DocShot 目录。
+#   - 【V2.4.1】exe 启动不再强制登录（直接进主窗看板）；所有阶段用
+#     tools\DocShot\Invoke-UiaLogin.ps1 走"点顶栏登录按钮 → 登录窗 → 自动登录"链路
+#     （admin/123456，与 LoginService 预置账号一致）；登录助手点源自 DocShot 目录。
 # ======================================================================
 
 param(
@@ -150,7 +151,7 @@ if ($LASTEXITCODE -ne 0) { throw "FakePlc 编译失败" }
 $modeFile = Join-Path $run "fakeplc_mode.txt"
 [System.IO.File]::WriteAllText($modeFile, "normal", (New-Object System.Text.UTF8Encoding($false)))
 
-# 登录助手点源（【V2.4.0】exe 启动先弹登录窗，所有阶段都要 UIA 自动登录）
+# 登录助手点源（【V2.4.1】启动直接进主窗；助手会点主窗顶栏"登录按钮"打开登录窗再登录）
 . (Join-Path $root "tools\DocShot\Invoke-UiaLogin.ps1")
 
 # ---------------- 用例执行 ----------------
@@ -164,11 +165,12 @@ function Start-FakePlcOnce {
 
 function Start-AppWithLogin {
     Start-Process (Join-Path $run "ProductionStatistics.Wpf.exe") -WorkingDirectory $run
-    Start-Sleep -Seconds 3   # 等登录窗出现
+    Start-Sleep -Seconds 2
     $app = Get-Process "ProductionStatistics.Wpf" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($app -eq $null) { throw "app 进程未启动" }
+    # 【V2.4.1】启动即主窗，助手内部：等主窗 → 点顶栏"登录按钮" → 登录窗 → 自动登录 → 等登录窗关闭
     $ok = Invoke-UiaLogin -Proc $app -User "admin" -Pass "123456" -TimeoutMs 30000
-    if (-not $ok) { throw "自动登录失败（主窗未出现）" }
+    if (-not $ok) { throw "自动登录失败（登录窗未关闭）" }
 }
 
 function Start-Stack {
@@ -191,31 +193,43 @@ $today = Get-Date -Format "yyyy-MM-dd"
 $logPath = Join-Path $run ("logs\运行日志_" + $today + ".log")
 
 try {
-    # ---------------- 阶段零：登录链路（T9 / T10 / T11）【V2.4.0】 ----------------
+    # ---------------- 阶段零：启动免登录 + 顶栏登录链路（T9 / T10 / T11 / T12）【V2.4.1】 ----------------
     Write-Output ""
-    Write-Output "[阶段零] 登录链路（T9 错误密码拒绝 / T10 正确登录 / T11 启动自动选页签）..."
+    Write-Output "[阶段零] 启动免登录 + 顶栏登录（T9 错误密码 / T10 正确登录 / T11 自动选页签 / T12 免登录进主窗）..."
     Start-FakePlcOnce
 
     Start-Process (Join-Path $run "ProductionStatistics.Wpf.exe") -WorkingDirectory $run
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
     $app = Get-Process "ProductionStatistics.Wpf" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($app -eq $null) { throw "app 进程未启动" }
 
-    # T9 错误密码：填 admin + 错密码点登录，日志应有"登录失败"且主窗不出现
+    # T12 启动免登录：主窗直接出现（不再先弹登录窗），日志有"主窗体初始化完成"且无"登录成功"
+    $log0Text = ""
+    for ($i = 0; $i -lt 20; $i++) {
+        if (Test-Path $logPath) {
+            $log0Text = ([System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8) -join "`n")
+            if ($log0Text -match "主窗体初始化完成") { break }
+        }
+        Start-Sleep -Seconds 1
+    }
+    Assert ($log0Text -match "主窗体初始化完成") "T12 启动直接进主窗（免登录）" "日志含'主窗体初始化完成'"
+    Assert (-not ($log0Text -match "登录成功: admin")) "T12 启动未自动登录" "免登录启动无'登录成功'"
+
+    # T9 错误密码：助手先点主窗顶栏"登录按钮"打开登录窗，填 admin + 错密码点登录；
+    #    登录窗应保持打开，日志记"登录失败"，且不出现"登录成功"
     Invoke-UiaLogin -Proc $app -User "admin" -Pass "wrong-pass" -NoWaitMain | Out-Null
     Start-Sleep -Seconds 2
-    $log0 = [System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8)
-    $log0Text = ($log0 -join "`n")
+    $log0Text = ([System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8) -join "`n")
     Assert ($log0Text -match "登录失败") "T9 错误密码被拒绝" "日志含'登录失败'"
-    Assert (-not ($log0Text -match "主窗体初始化完成")) "T9 错误密码不进主窗" "登录失败后无'主窗体初始化完成'"
+    Assert (-not ($log0Text -match "登录成功: admin")) "T9 错误密码不登录" "错误密码后无'登录成功'"
 
-    # T10 正确登录：同窗再填 admin/123456，应出主窗
-    Invoke-UiaLogin -Proc $app -User "admin" -Pass "123456" | Out-Null
-    Start-Sleep -Seconds 3
-    $log0 = [System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8)
-    $log0Text = ($log0 -join "`n")
+    # T10 正确登录：登录窗还开着，助手直接复用填 admin/123456 → 登录窗关闭（DialogResult=true）
+    $loginOk = Invoke-UiaLogin -Proc $app -User "admin" -Pass "123456"
+    Start-Sleep -Seconds 1
+    $log0Text = ([System.IO.File]::ReadAllLines($logPath, [System.Text.Encoding]::UTF8) -join "`n")
+    Assert ($loginOk -eq $true) "T10 正确账号登录（登录窗关闭）" "助手返回 true"
     Assert ($log0Text -match "登录成功: admin") "T10 正确账号登录成功" "日志含'登录成功: admin'"
-    Assert ($log0Text -match "主窗体初始化完成") "T10 主窗已创建" "日志含'主窗体初始化完成'"
+    Assert ($log0Text -match "主窗体初始化完成") "T10 主窗仍在" "日志含'主窗体初始化完成'"
 
     # T11 启动自动选页签：日志序号与当前时刻应选班次一致（口径与软件 自动选班次页签() 相同）
     $hourNow = (Get-Date).Hour

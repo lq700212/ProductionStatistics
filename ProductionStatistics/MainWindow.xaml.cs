@@ -84,6 +84,9 @@ namespace ProductionStatistics
         /// <summary>上次落盘时刻（显示在底栏）</summary>
         private DateTime 上次落盘显示 = DateTime.MinValue;
 
+        /// <summary>当前登录用户名【V2.4.1】：空=未登录（启动默认未登录，看板照常使用）</summary>
+        private string 当前登录用户 = "";
+
         /// <summary>构造函数：建界面集合、读配置、启采集、启刷新定时器</summary>
         public MainWindow()
         {
@@ -491,6 +494,8 @@ namespace ProductionStatistics
             设置项一.Header = 英文 ? "Feature 1 (placeholder)" : "功能 1（占位）";
             设置项二.Header = 英文 ? "Feature 2 (placeholder)" : "功能 2（占位）";
             设置项三.Header = 英文 ? "Feature 3 (placeholder)" : "功能 3（占位）";
+            // 登录按钮文字随语言 + 登录状态刷新（未登录=登录 / 已登录=已登录：用户名）
+            刷新登录按钮();
             语言中文.IsChecked = !英文;
             语言英文.IsChecked = 英文;
 
@@ -560,6 +565,49 @@ namespace ProductionStatistics
             if (AppConfig.设备名称En.Length > 0) return AppConfig.设备名称En;
             if (AppConfig.设备名称 == "点胶固化收料机") return "Dispensing-Curing-Collecting Machine";
             return AppConfig.设备名称;
+        }
+
+        // ===================== 登录（顶栏按钮）【V2.4.1】 =====================
+
+        /// <summary>
+        /// 登录按钮：弹出登录窗（ShowDialog 模态，Owner=主窗 → 窗口居中在主窗上）。
+        /// 软件启动不再强制登录（App.OnStartup 直接建主窗），这里只做按需身份确认：
+        /// 不登录也能看板/导出；登录成功后顶栏按钮显示当前用户名，再点可切换账号。
+        /// 关闭登录窗 = 取消本次登录，保持原登录状态，不影响正在使用的看板。
+        /// </summary>
+        private void 登录按钮_Click(object sender, RoutedEventArgs e)
+        {
+            var 登录窗 = new LoginWindow(英文界面) { Owner = this };
+            if (登录窗.ShowDialog() == true)
+            {
+                当前登录用户 = 登录窗.登录用户名 ?? "";
+                Log.Info("主窗登录成功: " + 当前登录用户);
+            }
+            else
+            {
+                Log.Info("登录窗已取消（保持当前状态: "
+                    + (当前登录用户.Length == 0 ? "未登录" : 当前登录用户) + "）");
+            }
+            刷新登录按钮();
+        }
+
+        /// <summary>
+        /// 刷新顶栏登录按钮文字：未登录="登录"，已登录="已登录：用户名"（英文界面同步）。
+        /// 静态文字集中走 应用语言() 的约定：切语言时由 应用语言() 再调本方法。
+        /// </summary>
+        private void 刷新登录按钮()
+        {
+            bool 已登录 = !string.IsNullOrEmpty(当前登录用户);
+            if (英文界面)
+            {
+                登录按钮.Content = 已登录 ? "Signed in: " + 当前登录用户 : "Sign in";
+                登录按钮.ToolTip = 已登录 ? "Switch account" : "Sign in";
+            }
+            else
+            {
+                登录按钮.Content = 已登录 ? "已登录：" + 当前登录用户 : "登录";
+                登录按钮.ToolTip = 已登录 ? "切换账号" : "登录";
+            }
         }
 
         // ===================== 设置下拉（顶栏）【V2.4.0】 =====================

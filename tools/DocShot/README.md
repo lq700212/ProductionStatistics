@@ -15,8 +15,8 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `DocShot.cs` | 截图驱动：备份现场 → 种子数据 → 改 ini → 起假 PLC → 起真 exe → **UIA 自动登录（admin/123456）** → 拍登录窗 00-login.png → 逐场景截图 → 导出 Excel（历史查询页签内）→ 还原现场【V2.4.0】 |
-| `Invoke-UiaLogin.ps1` | 【V2.4.0】登录窗 UIA 自动登录助手（点源复用）：按 AutomationId 找 用户名输入/密码输入/登录按钮，ValuePattern 填值 + InvokePattern 点击 + 键盘兜底；E2E 回归与本目录 harness 共用 |
+| `DocShot.cs` | 截图驱动：备份现场 → 种子数据 → 改 ini → 起假 PLC → 起真 exe → 等主窗 → 点顶栏「登录」按钮 → 拍登录窗 00-login.png → **UIA 自动登录（admin/123456）** → 逐场景截图 → 导出 Excel（历史查询页签内）→ 还原现场【V2.4.1】 |
+| `Invoke-UiaLogin.ps1` | 【V2.4.0，V2.4.1 按需弹窗版】登录 UIA 自动登录助手（点源复用）：等主窗 → 点顶栏「登录按钮」开登录窗 → 按 AutomationId 找 用户名输入/密码输入/登录按钮，ValuePattern 填值 + InvokePattern 点击 + 键盘兜底 → 等登录窗关闭；E2E 回归与本目录 harness 共用 |
 | `build_docshot.bat` | 【V2.4.0】DocShot/FakePlc 编译批处理（README 第 2 节命令的脚本版；ASCII-only，cmd 按 ANSI 解析 bat 不能写中文） |
 | `FakePlc.cs` | 假 PLC：HslCommunication 12.6 `MelsecMcServer(true)`，MC 3E 二进制，默认端口 6060 |
 | `seed_data.py` | 生成今天/昨天/前天的 25 行 × 14 列 CSV（UTF-8 BOM） |
@@ -63,8 +63,8 @@ copy /Y libs\HslCommunication.dll tools\DocShot\build\ >nul
 
 1. 关闭现场正在运行的「生产统计」窗口（软件没有单实例互斥，双开会互相覆盖 CSV；
    `DocShot` 启动时也会尝试结束已有进程）。
-1. 【V2.4.0】软件启动先弹登录窗：harness 已内置 UIA 自动登录（预置 admin/123456），
-   无需人工干预；登录窗截图 00-login.png 会一并产出。
+1. 【V2.4.1】软件启动直接进主窗（不再强制登录）：harness 会点顶栏「登录」按钮打开登录窗、
+   拍 00-login.png、再用 UIA 自动登录（预置 admin/123456），无需人工干预。
 2. 确认 `ProductionStatistics\bin\Debug\net472\生产统计.ini` 是现场值
    （IP、端口、语言=中文、主题=浅色、`# 不复位地址=` 处于注释状态）。
 3. 确认 `docs\images` 已存在。

@@ -105,7 +105,7 @@
 | `ProductionStatistics/Services/PlcCollector.cs` | 采集线程：合并读/逐点读、上升沿计数、时间记账、诊断日志 |
 | `ProductionStatistics/Services/StatisticsStore.cs` | 统计仓库：内存记录 + 30 秒 SQLite 落库【V2.3.1】（锁内拷快照、锁外写库） |
 | `ProductionStatistics/Services/StatisticsDbStore.cs` | SQLite 库仓库【V2.3.1】：建库/UPSERT/读取/区间查询/历史 CSV 一次性导入（主存储 `数据\生产统计.db`，WAL；库内 `_库锁` 串行化，采集线程落库与 UI 线程查询并发安全） |
-| `ProductionStatistics/LoginWindow.xaml(.cs)` | 登录窗【V2.4.0】：ChromeDialogWindow 弹窗基类 + 库控件族，启动先登录后主窗 |
+| `ProductionStatistics/LoginWindow.xaml(.cs)` | 登录窗【V2.4.0/V2.4.1】：主窗顶栏"登录"按钮按需弹出（启动免登录，登录只做身份确认） |
 | `ProductionStatistics/Business/LoginService.cs` | 登录验证【V2.4.0】：预置账号 admin/123456（写死源码），成败写日志 |
 | `ProductionStatistics/Services/AppConfig.cs` | ini 载入/缺省生成/主题写回（单例缓存） |
 | `ProductionStatistics/Services/ExcelExporter.cs` | Excel 导出（EPPlus，27 行 × 10 列） |

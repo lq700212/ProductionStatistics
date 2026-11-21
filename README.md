@@ -4,7 +4,7 @@
 
 **运行在工控机上的产线生产统计看板——三菱 FX5U 以太网采集 → 三单元 OK·NG 计数 + 班次时间记账 → SQLite 数据库落库 → Excel/CSV 导出，一条龙。**
 
-![version](https://img.shields.io/badge/version-v0.0.5-2C7BE5)
+![version](https://img.shields.io/badge/version-v0.0.7-2C7BE5)
 ![framework](https://img.shields.io/badge/.NET_Framework-4.7.2-5C2D91?logo=dotnet)
 ![platform](https://img.shields.io/badge/platform-Windows_10_11-0078D6?logo=windows11)
 ![plc](https://img.shields.io/badge/PLC-三菱_FX5U_MC协议-FF6A00)
@@ -26,7 +26,7 @@
 | | |
 | --- | --- |
 | ![登录窗](docs/images/00-login.png) | ![当天白班](docs/images/01-main-today-day.png) |
-| 登录窗：启动先验证（预置账号 admin），风格与主窗同一套控件族 | 主界面：7 页签看板（6 班次 + 历史查询）+ KPI + 单元状态 + 设备状态条 |
+| 登录窗：主界面顶栏「登录」按钮弹出（预置账号 admin），风格与主窗同一套控件族 | 主界面：7 页签看板（6 班次 + 历史查询）+ KPI + 单元状态 + 设备状态条 |
 | ![深色主题](docs/images/05-main-dark.png) | ![报警状态](docs/images/06-main-alarm.png) |
 | 深色主题（右上角开关即时切换并写回 ini） | 报警状态：状态条与右栏徽标变红，报警时间进统计 |
 | ![待料状态](docs/images/07-main-idle.png) | ![离线状态](docs/images/08-main-offline.png) |
@@ -51,7 +51,7 @@ dotnet build ProductionStatistics\ProductionStatistics.csproj -c Debug
 #  + 生产统计.ini（首次运行自动生成缺省配置）
 #    注：数据主存储 数据\生产统计.db 首次运行自动建库，发现旧版 CSV 会自动导入
 
-# ④ 端到端自动化回归（计数/存储/登录改动后必跑，11 组用例，含 UIA 自动登录）
+# ④ 端到端自动化回归（计数/存储/登录改动后必跑，含启动免登录 + 顶栏 UIA 登录链路）
 powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-E2ETests.ps1
 
 # ⑤ 主题键契约静态检查（改主题键/库样式/主窗控件键后必跑）
@@ -68,9 +68,11 @@ powershell -ExecutionPolicy Bypass -File tools\E2ETests\Run-ThemeContractTests.p
   单轮采样周期实测 109ms（老 4 次报文 200~330ms），漏采窗口减半；
 - **班次看板**：白班 08:00–20:00 / 夜班 20:00–次日 08:00 固定口径，12 小时行 + 合计行，
   KPI（总产能/OK/NG/良率/稼动率/生产时间）+ 稼动率圆环 + 三单元实时状态；
-- **登录窗【V2.4.0】**：启动先弹登录弹窗（`ChromeDialogWindow` + 库控件族，预置账号
-  admin/123456，`LoginService` 验证并记日志），验证通过才进主窗与采集；关闭登录窗 = 退出。
-  无角色/权限分级（单预置账号），登录窗只做身份确认；
+- **登录窗【V2.4.0，V2.4.1 改为按需弹出】**：软件启动直接进看板（**不登录也能使用**）；
+  顶栏"设置"按钮左侧新增"登录"按钮，点击弹登录窗（`ChromeDialogWindow` + 库控件族，
+  预置账号 admin/123456，`LoginService` 验证并记日志），登录成功按钮显示"已登录：admin"，
+  再点可切换账号；关闭登录窗 = 取消本次登录。无角色/权限分级（单预置账号），
+  登录窗只做身份确认；
 - **看板自动选班次【V2.4.0】**：启动按当前时刻自动停在"正在进行中"的班次页签
   （8~19 点→当天白班、≥20 点→当天夜班、凌晨→昨天夜班，与时间记账归属口径一致）；
 - **6+1 页签**：当天/昨天/前天 × 白/夜班 6 页签跨天自动刷新；第 7 页"历史查询"按日期区间 +
@@ -109,14 +111,15 @@ graph LR
     end
 
     subgraph APP[ProductionStatistics.Wpf]
-        LOGIN[LoginWindow + LoginService<br/>启动登录（预置 admin）]
+        LOGIN[LoginWindow + LoginService<br/>顶栏"登录"按钮按需弹出（预置 admin）]
         COL[PlcCollector 采集线程<br/>合并读 11 位 / 上升沿计数 / 时间记账]
         STORE[StatisticsStore + StatisticsDbStore<br/>内存统计 + 30 秒 SQLite 落库]
         EXP[ExcelExporter<br/>EPPlus]
         MAIN[MainWindow<br/>1 秒 DispatcherTimer<br/>7 页签（6 班次 + 历史查询）]
     end
 
-    LOGIN -.->|验证通过| MAIN
+    MAIN -.->|顶栏登录按钮弹出| LOGIN
+    LOGIN -.->|验证通过 / 切换账号| MAIN
     MAIN -.->|查询结果导出| EXP
     PLC -->|合并读 11 位| COL
     COL -->|写回 false 复位自锁位| PLC
@@ -151,8 +154,8 @@ graph LR
 ProductionStatistics/                    # 仓库根
 ├── ProductionStatistics/                # 主工程（WPF，.NET Framework 4.7.2）
 │   ├── MainWindow.xaml(.cs)             # 主窗体：7 页签看板（6 班次 + 历史查询）/ KPI / 设置下拉 / 自绘窗口
-│   ├── LoginWindow.xaml(.cs)            # 登录窗【V2.4.0】：ChromeDialogWindow 弹窗基类 + 库控件族
-│   ├── App.xaml(.cs)                    # 入口：日志初始化 / 异常兜底 / 主题切换 / 登录编排（先登录后主窗）
+│   ├── LoginWindow.xaml(.cs)            # 登录窗【V2.4.0】：主窗顶栏"登录"按钮按需弹出（V2.4.1）
+│   ├── App.xaml(.cs)                    # 入口：日志初始化 / 异常兜底 / 主题切换 / 直接建主窗（V2.4.1 免登录启动）
 │   ├── Services/                        # PlcCollector 采集 / StatisticsStore+StatisticsDbStore 落库 / AppConfig / ExcelExporter
 │   ├── Business/                        # TriggerDebouncer 去抖 / PlcSignalResetter 复位 / PlcAddressConfig 地址 / ShiftStore CSV 存取 / Log / LoginService 登录验证
 │   ├── ViewModels/ Controls/ Themes/    # 表格行·查询行模型 / 样式 / 两套主题色板
@@ -163,7 +166,7 @@ ProductionStatistics/                    # 仓库根
 │   └── Kaleidoscope.UI/                 #   WPF 复用控件库（键板 / Fresh·Kx 控件族 / 圆角窗基类）
 ├── docs/                                # 三份培训文档（操作员/客户技术/内部版）+ 截图
 ├── tools/
-│   ├── E2ETests/                        # ★ 端到端回归 11 组用例（T8 落库 + T9~T11 登录/自动选页签）+ 主题键契约静态检查
+│   ├── E2ETests/                        # ★ 端到端回归（T8 落库 + T9~T12 启动免登录/顶栏登录/自动选页签）+ 主题键契约静态检查
 │   │                                    #   另有 DocShot/shot_window.ps1 轻量窗口截图取证
 │   └── DocShot/                         # 文档截图 harness（FakePlc 假 PLC / Invoke-UiaLogin 自动登录 / 核验 / PDF 转换）
 ├── AGENTS.md                            # AI 协作规范（改代码前必读）
@@ -220,7 +223,8 @@ ProductionStatistics/                    # 仓库根
 ## 注意事项
 
 - **登录账号为出厂预置**（admin/123456，写死在 `LoginService.cs`）：首次部署后建议联系
-  我方修改；登录窗只做身份确认，无角色权限分级——按人限权需二次开发。
+  我方修改；软件启动不强制登录（顶栏"登录"按钮按需打开），登录窗只做身份确认，
+  无角色权限分级——按人限权需二次开发。
 - PLC 离线时程序不崩：界面红字提示、每 60 秒日志留痕、恢复后自动续采；
   但**断线时段的触发脉冲无法补采**（PLC 侧自锁位保持 ON，恢复后按"残留基准"处理不补计）——
   长时间离线建议现场核对 PLC 侧实际件数后用历史查询导出人工核对修正。

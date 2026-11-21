@@ -1,8 +1,9 @@
 <Application x:Class="ProductionStatistics.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- 【V2.4.0】StartupUri 已移除：启动顺序改为 App.OnStartup 手动编排——
-         先弹登录窗（模态），验证通过才创建主窗（见 App.xaml.cs ④ 用户登录）。 -->
+    <!-- 【V2.4.1】StartupUri 已移除：启动顺序改为 App.OnStartup 手动编排——
+         直接创建看板主窗（不强制登录），登录由主窗顶栏"登录"按钮按需弹出
+         （见 App.xaml.cs ④ 主窗 / MainWindow.登录按钮_Click）。 -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>

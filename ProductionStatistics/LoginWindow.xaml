@@ -4,18 +4,20 @@
         xmlns:ui="clr-namespace:Kaleidoscope.UI.Views;assembly=Kaleidoscope.UI"
         Title="用户登录"
         Width="420" Height="450"
-        WindowStartupLocation="CenterScreen"
+        WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         FontFamily="Microsoft YaHei UI" FontSize="13"
         TextOptions.TextFormattingMode="Ideal">
         <!-- 注意【V2.4.0】：不要设 ShowInTaskbar=False——.NET Process.MainWindowHandle
              会跳过不在任务栏的窗口返回 0，E2E/截图 harness 全靠 MainWindowHandle 找
-             登录窗自动登录（实测踩坑）。登录窗在任务栏短暂出现是可接受代价。 -->
+             登录窗自动登录（实测踩坑）。【V2.4.1】启动不再弹登录窗，harness 已改为
+             按窗口标题枚举找登录窗，本约束可以放宽，但保持现状不影响功能。 -->
 
-    <!-- ================= 登录窗【V2.4.0】 =================
-        做什么：软件启动的第一道门——App.OnStartup 先弹本窗（模态），验证通过才创建主窗。
+    <!-- ================= 登录窗【V2.4.0，V2.4.1 按需弹出】 =================
+        做什么：主窗顶栏"登录"按钮弹出的身份确认弹窗（模态，Owner=主窗居中）。
+            软件启动不再强制登录，不登录也能使用看板；关闭本窗 = 取消本次登录。
         骨架说明：继承库 ChromeDialogWindow（圆角自绘弹窗基类），标题条/圆角/投影/拖动
-            全由基类负责，本文件只写内容槽里的登录表单（右上角自带 × 关闭=取消登录退出程序）。
+            全由基类负责，本文件只写内容槽里的登录表单（右上角自带 × 关闭=取消登录）。
         样式契约：输入框用库 KxTextBox / KxPasswordBox，主按钮用 KxPrimaryButton（与主窗
             同一套控件族），错误提示用 StatusChipText 语义色（Tag=Ng 红）——切主题全跟随。
         交互：用户名/密码框回车=登录；输错显示红字提示并清空密码框；账号预置 admin/123456

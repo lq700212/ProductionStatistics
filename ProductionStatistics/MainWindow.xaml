@@ -144,6 +144,14 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- 登录按钮【V2.4.1】：原"启动强制登录"改为顶栏按需登录——
+                         软件启动直接进看板，不登录也能查看/导出；点本按钮弹 LoginWindow
+                         （模态，Owner=主窗居中），登录成功后按钮显示当前用户名，再点可切换账号。
+                         样式用库 KxSecondaryButton（ghost 描边），不与"设置"主色按钮抢视觉。 -->
+                    <Button x:Name="登录按钮" Style="{StaticResource KxSecondaryButton}" Click="登录按钮_Click"
+                            Content="登录" Padding="16,8" FontSize="13" Margin="0,0,10,0"
+                            ToolTip="登录 / 切换账号" />
+
                     <!-- 设置按钮【V2.4.0】：原"导出 Excel"按钮改为"设置"下拉入口
                          （导出 Excel 收拢进历史查询面板）。点击后弹下拉菜单（WinContextMenu +
                          WinMenuItem 库样式，项=占位，后续在此挂实际设置功能）。
